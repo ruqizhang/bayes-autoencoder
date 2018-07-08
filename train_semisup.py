@@ -88,16 +88,16 @@ with open(os.path.join(args.dir, 'command.sh'), 'w') as f:
 #create loss function - note K determines importance weighting, alpha renyi scaling/pvi scaling
 #default is to use the variational renyi bound with alpha = 1.0 and K = 1
 def criterion(data, K = args.K, alpha=args.alpha):
-    std_loss = utils.calculate_loss(model, data, K=K, alpha=alpha)
+    std_loss, loss2 = utils.calculate_ss_loss(model, data, K=K, alpha=alpha)
     if args.bvae:
         prior_loss = 0.0
         for param in model.parameters():
             prior_dist = torch.distributions.Normal(torch.zeros_like(param), torch.ones_like(param))
             prior_loss -= prior_dist.log_prob(param).sum()
 
-        return std_loss + prior_loss/data.size(0)
+        return std_loss + prior_loss/data.size(0), loss2
     else:
-        return std_loss
+        return std_loss, loss2
 
 training_loss = [None]*(args.epochs + 1)
 testing_loss = [None]*(args.epochs + 1)
