@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torchvision.utils import save_image
-from mlp import MLP, Linear2
+from .mlp import MLP, Linear2
 import torch.distributions
 
 class mlpBAE(nn.Module):

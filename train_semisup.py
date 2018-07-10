@@ -55,16 +55,9 @@ else:
 print('Using model %s' % args.model)
 model_cfg = getattr(models, args.model)
 
-print('Preparing model')
-print(*model_cfg.args)
-print('using ', args.zdim, ' latent space')
-model = model_cfg.base(*model_cfg.args, zdim=args.zdim, **model_cfg.kwargs)
-model.to(args.device)
-model.device = args.device
-
 #prepare the dataset
 print('Loading dataset %s from %s' % (args.dataset, args.data_path))
-loaders = data.loaders(
+loaders, num_classes = data.loaders(
     args.dataset,
     args.data_path,
     args.batch_size,
@@ -72,8 +65,16 @@ loaders = data.loaders(
     model_cfg.transform_train,
     model_cfg.transform_test,
     use_validation=not args.use_test,
-    unsup=True
+    unsup=False
 )
+
+print('Preparing model')
+print(*model_cfg.args)
+print('using ', args.zdim, ' latent space')
+model = model_cfg.base(*model_cfg.args, zdim=args.zdim, nclasses=num_classes, **model_cfg.kwargs)
+model.to(args.device)
+model.device = args.device
+
 #prepare the optimizer
 optimizer = utils.construct_optimizer(model.parameters(), args.optimizer, args.optimizer_options)
 
@@ -87,23 +88,15 @@ with open(os.path.join(args.dir, 'command.sh'), 'w') as f:
 
 #create loss function - note K determines importance weighting, alpha renyi scaling/pvi scaling
 #default is to use the variational renyi bound with alpha = 1.0 and K = 1
-def criterion(data, K = args.K, alpha=args.alpha):
-    std_loss, loss2 = utils.calculate_ss_loss(model, data, K=K, alpha=alpha)
-    if args.bvae:
-        prior_loss = 0.0
-        for param in model.parameters():
-            prior_dist = torch.distributions.Normal(torch.zeros_like(param), torch.ones_like(param))
-            prior_loss -= prior_dist.log_prob(param).sum()
-
-        return std_loss + prior_loss/data.size(0), loss2
-    else:
-        return std_loss, loss2
+def criterion(data, y=None, K = args.K, alpha=args.alpha):
+    std_loss, loss2 = model.loss(data, y, K=K, alpha=alpha)
+    return std_loss, loss2
 
 training_loss = [None]*(args.epochs + 1)
 testing_loss = [None]*(args.epochs + 1)
 
 for epoch in range(1, args.epochs + 1):
-    training_loss[epoch] = utils.train(model, optimizer, loaders['train'], criterion, args.device, epoch=epoch, log_interval=args.log_interval)
+    training_loss[epoch] = utils.train_ss(model, optimizer, loaders['train'], criterion, args.device, epoch=epoch, log_interval=args.log_interval)
     
     with torch.no_grad():
         save_recon = False
@@ -117,7 +110,7 @@ for epoch in range(1, args.epochs + 1):
 
         K = 10
         print('Using ', K, 'samples for testing LL')
-        testing_loss[epoch] = utils.test(model, loaders['test'], criterion, K, args.device, save_recon, **kwargs)
+        testing_loss[epoch] = utils.test_ss(model, loaders['test'], criterion, model.calc_accuracy, K, args.device, save_recon, **kwargs)
 
 
 

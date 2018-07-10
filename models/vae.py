@@ -12,8 +12,17 @@ from torchvision.utils import save_image
 from torchvision import transforms
 
 from .mlp import MLP, Linear2
+import inferences
 
-__all__=['VAE', 'M2VAE']
+__all__=['VAE', 'M2VAE', 'BVAE', 'M2BVAE']
+
+def compute_prior_loss(model, scale = 1.0):
+    loss = 0.0
+    for param in model.parameters():
+        param_dist = torch.distributions.Normal(torch.zeros_like(param), scale * torch.ones_like(param))
+        loss -= param_dist.log_prob(param).sum()
+
+    return loss
 
 class baseVAE(nn.Module):
     #standard unsupervised vae architecture
@@ -64,14 +73,62 @@ class baseVAE(nn.Module):
             print('saving model samples at ', epoch)
             z_ymat = torch.cat((mu.data.cpu(), y.float().view(-1,1)),dim=1).numpy()
             numpy.savetxt(dir + 'saved_samples_' + str(epoch) +'.csv', z_ymat, delimiter = ',')
-    
-class baseM2VAE(nn.Module):
-    def __init__(self, dim = 784, zdim = 50, hidden = 500, nclasses = 10, activation = nn.ReLU):
-        super(baseM2VAE, self).__init__()
-        self.dim, self.zdim, self.hidden, self.nclasses = dim, zdim, hidden, nclasses
+
+    def loss(self, data, K=1, alpha = 1, iw_function=inferences.VR, ss = False):
+        priordist = torch.distributions.Normal(torch.zeros(data[0].size(0), self.zdim).to(self.device), torch.ones(data[0].size(0), self.zdim).to(self.device))
+        prior_x = [priordist] * K
+        z = [None] * K
+        l_dist = [None] * K
+        q_dist = [None] * K
         
+        #pass forwards
+        if not ss:
+            mu, logvar = self.forward(data)  
+        else:
+            mu, logvar, logits = self.forward(data[0], data[1])  
+        
+        for k in range(K):
+            #generate distribution
+            q_dist[k] = torch.distributions.Normal(mu, torch.exp(logvar.mul(0.5)))
+            
+            #reparameterize
+            z[k] = q_dist[k].rsample()
+        
+            #pass backwards
+            if not ss:
+                x_probs = self.decode(z[k])
+            else:
+                x_probs = self.decode(z[k], data[1])
+        
+            #create distributions
+            l_dist[k] = torch.distributions.Bernoulli(probs = x_probs)
+            
+        #compute loss function
+        loss = iw_function(z, data[0].view(-1,784), l_dist, prior_x, q_dist, K = K, alpha = alpha)
+
+        if not ss:
+            return loss
+        else:
+            return loss, logits
+
+class baseBVAE(baseVAE):
+    def __init__(self, dim = 784, zdim = 50, hidden = 500, activation = nn.ReLU):
+        super(baseBVAE, self).__init__(dim, zdim, hidden, activation)
+
+    def loss(self, data, **kwargs):
+        main_loss = super(baseBVAE, self).loss(data, **kwargs)
+
+        prior_loss = compute_prior_loss(self) 
+
+        return main_loss + prior_loss/len(data) 
+
+class baseM2VAE(baseVAE):
+    def __init__(self, dim = 784, zdim = 50, hidden = 500, nclasses = 10, activation = nn.ReLU):
+        super(baseM2VAE, self).__init__(dim, zdim, hidden, activation)
+        self.dim, self.zdim, self.hidden, self.nclasses = dim, zdim, hidden, nclasses
         self.encoder_y_real = MLP(dim, hidden, nclasses, activation = activation)
-        self.encoder_z = MLP(dim, hidden, zdim, out_layer = Linear2, activation = activation)
+        #we're now using self.encoder from the super-class
+        #self.encoder_z = MLP(dim, hidden, zdim, out_layer = Linear2, activation = activation)
         self.decoder = MLP(zdim+nclasses, hidden, dim, activation = activation)
         
         self.norm_classifier_outputs = nn.LogSoftmax(dim=1)
@@ -80,7 +137,7 @@ class baseM2VAE(nn.Module):
         self.kwargs = dict()
 
     def encode(self, x):
-        return self.encoder_z(x.view(-1, self.dim))
+        return self.encoder(x.view(-1, self.dim))
     
     def decode(self, z, y):
         inp = torch.cat((z.view(-1,self.zdim), y.view(-1,self.nclasses)),dim=1)
@@ -96,6 +153,50 @@ class baseM2VAE(nn.Module):
         mu, logvar = self.encode(x)
         return mu, logvar, logits 
 
+    def loss(self, data, y = None, K = 1, alpha = 1, iw_function=inferences.VR, weight=300., num_classes=10):
+        if y is not None:
+            ul_loss, logits = super(baseM2VAE, self).loss((data, y), K, alpha, iw_function, ss=True)
+
+            c_dist = torch.distributions.OneHotCategorical(logits = logits)
+            c_loss = - weight * c_dist.log_prob(y)
+
+            total_loss = ul_loss.view(-1) + c_loss
+            secondary_loss = c_loss.sum()
+        else:
+            secondary_loss = None
+            total_loss = 0.0
+            for yy in range(num_classes):
+                #create on-hot vector
+                ycurrent = torch.zeros(data.size(0), num_classes)
+                ycurrent[:,yy] = 1
+                ycurrent.to(self.device)
+
+                ul_loss, logits = super(baseM2VAE, self).loss((data, ycurrent), K, alpha, iw_function, ss=True)
+                y_dist = torch.distributions.OneHotCategorical(logits = logits)
+                y_lprob = y_dist.log_prob(ycurrent)
+
+                total_loss += torch.exp(y_lprob) * (ul_loss.view(-1) - y_lprob)
+        return total_loss.sum(), secondary_loss
+
+    def calc_accuracy(self, data, y_one_hot, yvec):
+        r"""
+        simple function for computing accuracy
+        """
+        mu, logvar, logits = self.forward(data, y_one_hot)
+        _, pred = torch.max(logits, dim = 1)
+        misclass = (pred.data.long() - yvec.long()).ne(int(0)).cpu().long().sum()
+        return misclass.item()/data.size(0)
+
+class baseM2BVAE(baseM2VAE):
+    def __init__(self, dim = 784, zdim = 50, hidden = 500, nclasses = 10, activation = nn.ReLU):
+        super(baseM2BVAE, self).__init__(dim, zdim, hidden, nclasses, activation)
+        
+    def loss(self, data, y, **kwargs):
+        main_loss, secondary_loss = super(baseM2BVAE, self).loss(data, y, **kwargs)
+
+        prior_loss = compute_prior_loss(self)  
+        return main_loss + prior_loss/len(data), secondary_loss
+
 class VAE:
     args = list()
     kwargs = {'dim': 784, 'hidden':500}
@@ -104,6 +205,11 @@ class VAE:
     transform_train = lambda x: transforms.ToTensor()(x).bernoulli()
     transform_test = transform_train
 
+class BVAE(VAE):
+    def __init__(self):
+        super(BVAE, self).__init__()
+    base = baseBVAE
+
 class M2VAE:
     args = list()
     kwargs = {'dim': 784, 'hidden':500}
@@ -111,3 +217,8 @@ class M2VAE:
 
     transform_train = lambda x: transforms.ToTensor()(x).bernoulli()
     transform_test = transform_train
+
+class M2BVAE(VAE):
+    def __init__(self):
+        super(M2VAE, self).__init__()
+    base = baseM2BVAE    

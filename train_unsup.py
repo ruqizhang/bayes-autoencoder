@@ -38,7 +38,7 @@ parser.add_argument('--resume', type=str, default=None, metavar='CKPT',
                     help='checkpoint to resume training from (default: None)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
-parser.add_argument('--bvae', action='store_true', help='whether to use the bvae instead of vae')
+#parser.add_argument('--bvae', action='store_true', help='whether to use the bvae instead of vae')
 args = parser.parse_args()
 
 #set cuda if available, while also setting seed
@@ -88,16 +88,8 @@ with open(os.path.join(args.dir, 'command.sh'), 'w') as f:
 #create loss function - note K determines importance weighting, alpha renyi scaling/pvi scaling
 #default is to use the variational renyi bound with alpha = 1.0 and K = 1
 def criterion(data, K = args.K, alpha=args.alpha):
-    std_loss = utils.calculate_loss(model, data, K=K, alpha=alpha)
-    if args.bvae:
-        prior_loss = 0.0
-        for param in model.parameters():
-            prior_dist = torch.distributions.Normal(torch.zeros_like(param), torch.ones_like(param))
-            prior_loss -= prior_dist.log_prob(param).sum()
-
-        return std_loss + prior_loss/data.size(0)
-    else:
-        return std_loss
+    std_loss = model.loss(data, K=K, alpha=alpha)
+    return std_loss
 
 training_loss = [None]*(args.epochs + 1)
 testing_loss = [None]*(args.epochs + 1)
