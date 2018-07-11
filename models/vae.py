@@ -53,9 +53,9 @@ class baseVAE(nn.Module):
 
         sample = self.decode(sample).cpu()
         save_image(sample.data.view(64, 1, 28, 28),
-             dir + 'sample_' + str(epoch) + '.png') 
+             dir + '/sample_' + str(epoch) + '.png') 
     
-    def reconstruct_samples(self, data, y, dir, epoch):
+    def reconstruct_samples(self, data, y, dir, epoch, **kwargs):
         batch_size = data.size(0)
         mu, _ = self.forward(data)
 
@@ -74,7 +74,7 @@ class baseVAE(nn.Module):
             z_ymat = torch.cat((mu.data.cpu(), y.float().view(-1,1)),dim=1).numpy()
             numpy.savetxt(dir + 'saved_samples_' + str(epoch) +'.csv', z_ymat, delimiter = ',')
 
-    def loss(self, data, K=1, alpha = 1, iw_function=inferences.VR, ss = False):
+    def loss(self, data, K=1, alpha = 1, iw_function=inferences.VR, ss = False, **kwargs):
         priordist = torch.distributions.Normal(torch.zeros(data[0].size(0), self.zdim).to(self.device), torch.ones(data[0].size(0), self.zdim).to(self.device))
         prior_x = [priordist] * K
         z = [None] * K

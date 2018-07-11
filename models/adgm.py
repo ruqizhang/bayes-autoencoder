@@ -74,7 +74,7 @@ class baseADGM(nn.Module):
         
         return x_probs, qa_dist, qz_dist, pa_dist, qa, qz, logits
 
-    def loss(self, data, y, K=1, alpha=1.0, inference=inferences.VR, weight = 300):    
+    def loss(self, data, y, K=1, alpha=1.0, inference=inferences.VR, weight = 300., **kwargs):    
         priordist = torch.distributions.Normal(torch.zeros(data[0].size(0), self.zdim).to(self.device), torch.ones(data[0].size(0), self.zdim).to(self.device))  
         prior_z = [priordist] * K
         def inner_loss(data, y):
@@ -139,11 +139,11 @@ class baseBADGM(baseADGM):
     def __init__(self, dim = 784, nclasses =10, zdim = 50, adim = 50, hidden = 500, activation = nn.ReLU):
         super(baseBADGM, self).__init__(dim, nclasses, zdim, adim, hidden, activation)
 
-    def loss(self, data, **kwargs):
-        main_loss = super(baseBADGM, self).loss(data, **kwargs)
+    def loss(self, data, y, **kwargs):
+        main_loss, secondary_loss = super(baseBADGM, self).loss(data, y, **kwargs)
         prior_loss = compute_prior_loss(self) 
 
-        return main_loss + prior_loss/len(data) 
+        return main_loss + prior_loss/len(data), secondary_loss
 
 class ADGM:
     args = list()

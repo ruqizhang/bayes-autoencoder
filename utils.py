@@ -53,7 +53,7 @@ def make_onehot(y, num_classes=10):
     tmp[torch.arange(0, y.size(0)).long(), y.long()] = 1
     return tmp
 
-def train(model, optimizer, train_loader, lossfn, device, epoch, log_interval):
+def train(model, optimizer, train_loader, lossfn, device, epoch, log_interval, **kwargs):
     model.train()
     train_loss = 0
     for batch_idx, (data, _) in enumerate(train_loader):
@@ -62,7 +62,7 @@ def train(model, optimizer, train_loader, lossfn, device, epoch, log_interval):
         optimizer.zero_grad()
         
         def closure():
-            loss = lossfn(data)
+            loss = lossfn(data, **kwargs)
             loss.backward()
             return loss
         
@@ -81,13 +81,13 @@ def train(model, optimizer, train_loader, lossfn, device, epoch, log_interval):
     
     return train_loss/len(train_loader.dataset)
 
-def test(model, test_loader, lossfn, K, device, reconstruct=False, **kwargs):
+def test(model, test_loader, lossfn, device, reconstruct=False, **kwargs):
     model.eval()
     test_loss = 0
     for i, (data, y) in enumerate(test_loader):
         data = data.to(device)
 
-        test_loss += lossfn(data, K).item()
+        test_loss += lossfn(data, **kwargs).item()
         
         #save the first batch in testing
         if i == 0 and reconstruct:
@@ -100,7 +100,7 @@ def test(model, test_loader, lossfn, K, device, reconstruct=False, **kwargs):
 
 
 def train_ss(model, optimizer, loaders, lossfn, device, epoch, log_interval, train_batches = 10, test_batches = 1, 
-          cycle = True, num_classes=10):
+          cycle = True, num_classes=10, **kwargs):
     model.train()
     
     ulab_size = len(loaders['ulab'].dataset)
@@ -129,8 +129,8 @@ def train_ss(model, optimizer, loaders, lossfn, device, epoch, log_interval, tra
         
         if lab is not None: 
             #finish update for one-hot   
-            data_lab, y = lab[0].to(device), lab[1]
-            y = make_onehot(y, num_classes=num_classes)
+            data_lab, y = lab[0].to(device), lab[1].to(device)
+            y = make_onehot(y, num_classes=num_classes).to(device)
         else:
             data_lab = None
         
@@ -139,13 +139,13 @@ def train_ss(model, optimizer, loaders, lossfn, device, epoch, log_interval, tra
         optimizer.zero_grad()
         
         if data_lab is not None:
-            lab_loss, second_loss = lossfn(data_lab, y)
+            lab_loss, second_loss = lossfn(data_lab, y, **kwargs)
             lab_length = len(data_lab)
         else:
             lab_loss = torch.zeros(1, requires_grad=True).to(device)
             lab_length = 1
         
-        ulab_loss,_ = lossfn(data_ulab)
+        ulab_loss,_ = lossfn(data_ulab, **kwargs)
 
         loss = lab_loss + ulab_loss
         loss.backward()
@@ -174,25 +174,24 @@ def train_ss(model, optimizer, loaders, lossfn, device, epoch, log_interval, tra
                     train_lab_loss2/lab_size))
     return lab_loss/lab_size, ulab_loss/ulab_size
     
-def test_ss(model, optimizer, loader, lossfn, calc_accuracy, device, epoch, num_classes = 10, reconstruct = False):
+def test_ss(model, loader, lossfn, calc_accuracy, device, epoch, num_classes = 10, reconstruct = False, **kwargs):
     model.eval()
     test_loss = 0
-    misclass = 0
+    misclass = 0.0
 
     for i, (data, y) in enumerate(loader):
         with torch.no_grad():  
             data = data.to(device)
-            y_one_hot = make_onehot(y, num_classes=num_classes)
+            y = y.to(device)
+            y_one_hot = make_onehot(y, num_classes=num_classes).to(device)
 
-            
-            loss,_ = lossfn(data, y_one_hot)
-            test_loss += loss.data[0]
-            batch_misclass = calc_accuracy(model, data, y_one_hot, y)
+            loss,_ = lossfn(data, y_one_hot, **kwargs)
+            test_loss += loss.item()
+            batch_misclass = calc_accuracy(data, y_one_hot, y)
         misclass += data.size(0)/len(loader.dataset) * batch_misclass
-        
         #save the first batch in testing
-        if i == 0 and reconstruct:
-            model.reconstruct_samples(data, y_one_hot)
+        #if i == 0 and reconstruct:
+        #    model.reconstruct_samples(data, y_one_hot)
 
     print('====> Test set accuracy: ', 1-misclass)
     test_loss /= len(loader.dataset)

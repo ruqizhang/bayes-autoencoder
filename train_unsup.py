@@ -38,7 +38,6 @@ parser.add_argument('--resume', type=str, default=None, metavar='CKPT',
                     help='checkpoint to resume training from (default: None)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
-#parser.add_argument('--bvae', action='store_true', help='whether to use the bvae instead of vae')
 args = parser.parse_args()
 
 #set cuda if available, while also setting seed
@@ -76,6 +75,7 @@ loaders = data.loaders(
 )
 #prepare the optimizer
 optimizer = utils.construct_optimizer(model.parameters(), args.optimizer, args.optimizer_options)
+model.sampler = optimizer
 
 #make directory
 print('Preparing directory %s' % args.dir)
@@ -85,17 +85,12 @@ with open(os.path.join(args.dir, 'command.sh'), 'w') as f:
     f.write('python '.join(sys.argv))
     f.write('\n')
 
-#create loss function - note K determines importance weighting, alpha renyi scaling/pvi scaling
-#default is to use the variational renyi bound with alpha = 1.0 and K = 1
-def criterion(data, K = args.K, alpha=args.alpha):
-    std_loss = model.loss(data, K=K, alpha=alpha)
-    return std_loss
-
 training_loss = [None]*(args.epochs + 1)
 testing_loss = [None]*(args.epochs + 1)
 
 for epoch in range(1, args.epochs + 1):
-    training_loss[epoch] = utils.train(model, optimizer, loaders['train'], criterion, args.device, epoch=epoch, log_interval=args.log_interval)
+    training_loss[epoch] = utils.train(model, optimizer, loaders['train'], model.loss, args.device, epoch=epoch, log_interval=args.log_interval,
+                                    K=args.K, alpha=args.alpha)
     
     with torch.no_grad():
         save_recon = False
@@ -109,7 +104,7 @@ for epoch in range(1, args.epochs + 1):
 
         K = 10
         print('Using ', K, 'samples for testing LL')
-        testing_loss[epoch] = utils.test(model, loaders['test'], criterion, K, args.device, save_recon, **kwargs)
+        testing_loss[epoch] = utils.test(model, loaders['test'], model.loss, args.device, save_recon, K=K, alpha = args.alpha, **kwargs)
 
 
 

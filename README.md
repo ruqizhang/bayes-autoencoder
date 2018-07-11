@@ -1,8 +1,10 @@
-under construction
+under construction - so far all implemented models have been tested for running, but not for accuracy
 
-train_unsup.py should be working for pytorch0.4+
+Example train_semisup.py call:
+  python train_semisup.py --dataset MNIST --data_path /scratch/datasets/ --epochs 3 --model SSBAE --dir exps/test --optimizer SGHMC --optimizer_options lr=1e-7 --save-epochs 1
 
-place new models in models/ directory as in vae.py
-  - no BAE models have been built/tested yet
+Example train_unsup.py call:
+  python train_unsup.py --dataset MNIST --data_path /scratch/datasets/ --epochs 3 --model SSBAE --dir exps/test --optimizer SGHMC --optimizer_options lr=1e-7 --save-epochs 1
+
 
 
