@@ -47,7 +47,7 @@ class AIS(object):
         #store schedule and reverse schedule
         self.schedule = get_schedule(num_beta)
         self.rev_schedule = torch.Tensor(self.schedule[::-1].copy())
-        self.schedule = torch.from_numpy(self.schedule).float()
+        #self.schedule = torch.from_numpy(self.schedule).float()
 
         #store optimizer
         if optimizer is None:
@@ -99,8 +99,6 @@ class AIS(object):
 
                     return loss
 
-                #make the data in the update step volatile & not requiring a gradient
-                #dont evaluate the prior sample?
                 with torch.no_grad():
                     update = log_prob(t1, data, backwards) - log_prob(t0, data, backwards)
                     logw_k += update
