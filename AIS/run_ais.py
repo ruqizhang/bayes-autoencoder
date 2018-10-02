@@ -1,3 +1,9 @@
+"""
+author: wesley maddox
+date: 10/1/18
+bastardized version of bdmc.py in the original git repo
+"""
+
 import numpy as np
 import itertools
 import time
@@ -11,7 +17,7 @@ from vae import VAE
 
 import sys
 sys.path.append('..')
-from bae_model import BAE
+import unsup_text.models
 
 #from hparams import get_default_hparams
 from torchvision import datasets, transforms
@@ -20,6 +26,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description='AIS with bayesian auto-encoder')
 parser.add_argument('--file', type=str, default ='', help = 'file to run test loading on')
+parser.add_argument('--dataset', type=str, default='MNIST')
 parser.add_argument('--model', type=str, default='BAE', help = 'class of model to load')
 parser.add_argument('--zdim', type=int, default = 20, metavar = 'S',
                     help='latent + noise dimension to use in model')
@@ -41,7 +48,7 @@ def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_samp
         loader (iterator): iterator to loop over pairs of Variables; the first 
             entry being `x`, the second being `z` sampled from the true 
             posterior `p(z|x)`
-        forward_schedul/home/rz297/vae/results/bn_model.pte (list or numpy.ndarray): forward temperature schedule;
+        forward_schedule (list or numpy.ndarray): forward temperature schedule;
             backward schedule is used as its reverse
     Returns:
         Two lists for forward and backward bounds on batchs of data
@@ -53,35 +60,46 @@ def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_samp
     # forward chain
     forward_logws = ais_trajectory(model, load, mode='forward', schedule=forward_schedule, n_sample=n_sample)
 
-    # backward chain
-    #backward_schedule = np.flip(forward_schedule, axis=0)
-    #backward_logws = ais_trajectory(model, load_, mode='backward', schedule=backward_schedule, n_sample=n_sample)
-
-    #upper_bounds = []
     lower_bounds = []
 
     for forward in forward_logws:
         lower_bounds.append(forward.mean())
-        #upper_bounds.append(backward.mean())
 
-    #upper_bounds = np.mean(upper_bounds)
     lower_bounds = np.mean(lower_bounds)
 
-    #print ('Average bounds on simulated data: lower %.4f, upper %.4f' % (lower_bounds, upper_bounds))
 
-    return forward_logws#, backward_logws
+    return forward_logws
 
-#use a variant of test loader so we don't have to re-generate the batch stuff
-test_loader = torch.utils.data.DataLoader(
-    datasets.MNIST('/scratch/datasets', train=False, transform=to_bernoulli, download=True),
-    batch_size=10000, shuffle=True)
+if args.dataset == 'MNIST':
+    #use a variant of test loader so we don't have to re-generate the batch stuff
+    test_loader = torch.utils.data.DataLoader(
+        datasets.MNIST('/scratch/datasets', train=False, transform=to_bernoulli, download=True),
+        batch_size=10000, shuffle=True)
 
-for (data, label) in test_loader:
-    test_tensor_list = (data.cuda(async=False).view(-1, 784), label.cuda(async=False))
-class myiterator:
-    def __iter__(self):
-        return iter([test_tensor_list])
-#new_test_loader = myiterator()
+    for (data, label) in test_loader:
+        test_tensor_list = (data.cuda(async=False).view(-1, 784), label.cuda(async=False))
+    class myiterator:
+        def __iter__(self):
+            return iter([test_tensor_list])
+
+    loader = myiterator()
+
+if args.dataset == 'ptb':
+    import unsup_text.data as data
+    corpus = data.Corpus('../datasets/ptb') #change this line
+
+    def batchify(data, bsz):
+        # Work out how cleanly we can divide the dataset into bsz parts.
+        nbatch = data.size(0) // bsz
+        # Trim off any extra elements that wouldn't cleanly fit (remainders).
+        data = data.narrow(0, 0, nbatch * bsz)
+        # Evenly divide the data across the bsz batches.
+        data = data.view(bsz, -1).t().contiguous()
+        if args.cuda:
+            data = data.cuda(device_id)
+        return data
+
+    loader = batchify(corpus.test, eval_batch_size)
 
 #hps = {'zdim:', zdim}
 #hps = {'x_dim':784,'z_dim':args.zdim,'hidden_dim':400}
@@ -95,15 +113,19 @@ def main(f=args.file):
     if args.model == 'BAE':
         model = BAE(**hps)
 
+    # load model
     model.cuda()
+    # there may be discrepancies in how the model was saved
     try:
-        model.load_state_dict(torch.load(f, map_location=lambda storage, loc: storage)['state_dict'])
+        model_state_dict = torch.load(f, map_location=lambda storage, loc: storage)['state_dict']
     except:
-        model.load_state_dict(torch.load(f, map_location=lambda storage, loc: storage))
+        model_state_dict = torch.load(f, map_location=lambda storage, loc: storage)
+
+    model.load_state_dict(model_state_dict)
+
     model.eval()
 
-    #loader = simulate_data(model, batch_size=100, n_batch=10)
-    loader = myiterator()
+    # run num_steps of AIS in batched mode with num_samples chains    
     forward_ais(model, loader, forward_schedule=np.linspace(0., 1., args.num_steps), n_sample=args.num_samples)
 
 
