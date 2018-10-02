@@ -14,10 +14,14 @@ from torch.autograd import grad as torchgrad
 from ais import ais_trajectory
 from simulate import simulate_data
 from vae import VAE
+from utils import sigmoidal_schedule
 
 import sys
 sys.path.append('..')
-import unsup_text.models
+from unsup_text.models import *
+#from bae import BAE
+sys.path.append('/nfs01/wm326/bvae/vae_images')
+from mnist_unsup.models import *
 
 #from hparams import get_default_hparams
 from torchvision import datasets, transforms
@@ -86,7 +90,7 @@ if args.dataset == 'MNIST':
 
 if args.dataset == 'ptb':
     import unsup_text.data as data
-    corpus = data.Corpus('../datasets/ptb') #change this line
+    corpus = data.Corpus('../datasets/ptb') #change this line if necessary
 
     def batchify(data, bsz):
         # Work out how cleanly we can divide the dataset into bsz parts.
@@ -96,14 +100,13 @@ if args.dataset == 'ptb':
         # Evenly divide the data across the bsz batches.
         data = data.view(bsz, -1).t().contiguous()
         if args.cuda:
-            data = data.cuda(device_id)
+            data = data.cuda(async=True)
         return data
 
     loader = batchify(corpus.test, eval_batch_size)
 
-#hps = {'zdim:', zdim}
-#hps = {'x_dim':784,'z_dim':args.zdim,'hidden_dim':400}
-hps = {'z_dim':args.zdim, 'noise_dim':args.zdim, 'dim':784}
+hps = {'dim':784,'zdim':args.zdim,'hidden':500,'noise_dim':args.zdim}
+#hps = {'z_dim':args.zdim, 'noise_dim':args.zdim, 'dim':784}
 
 def main(f=args.file):
     #hps = get_default_hparams()
@@ -111,7 +114,7 @@ def main(f=args.file):
     if args.model == 'VAE':
         model = VAE(**hps)
     if args.model == 'BAE':
-        model = BAE(**hps)
+        model = BayesAE(**hps)
 
     # load model
     model.cuda()
@@ -126,7 +129,7 @@ def main(f=args.file):
     model.eval()
 
     # run num_steps of AIS in batched mode with num_samples chains    
-    forward_ais(model, loader, forward_schedule=np.linspace(0., 1., args.num_steps), n_sample=args.num_samples)
+    forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples)
 
 
 if __name__ == '__main__':

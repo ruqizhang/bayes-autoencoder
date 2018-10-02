@@ -73,6 +73,8 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         # initial sample of z
         if mode == 'forward':
             current_z = torch.randn(B, z_size, dtype=batch.dtype, device = batch.device)
+            #current_z = model.encode(batch)
+            #current_z.detach_()
             current_z.requires_grad = True
         else:
             current_z = safe_repeat(post_z, n_sample).type(batch.dtype).device(batch.device)
