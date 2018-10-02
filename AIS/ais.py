@@ -1,174 +1,130 @@
-"""
-new version of ais using the sghmc_optimizer
-
-re-written based off of the old ais code and the sghmc_optimizer code
-
-fix this documentation
-
-"""
-
-#from sghmc_optimizer import SGHMC
-import torch
 import numpy as np
-import math
-import copy
+import time
+
+import torch
 from torch.autograd import Variable
+from torch.autograd import grad as torchgrad
+from utils import log_normal, log_bernoulli, log_mean_exp, discretized_logistic, safe_repeat
+from hmc import hmc_trajectory, accept_reject
+from tqdm import tqdm
 
-def LogSumExp(x,dim=0):
-    m,_ = torch.max(x,dim=dim,keepdim=True)
-    return m + torch.log((x - m).exp().sum(dim=dim, keepdim=True))
 
-def get_schedule(num, rad=4):
-    #copied from ais generative model paper's code
-    #geometric averages
-    if num == 1:
-        return np.array([0.0, 1.0])
-    t = np.linspace(-rad, rad, num)
-    s = 1.0 / (1.0 + np.exp(-t))
-    return (s - np.min(s)) / (np.max(s) - np.min(s))
+def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 500), n_sample=100):
+    """Compute annealed importance sampling trajectories for a batch of data. 
+    Could be used for *both* forward and reverse chain in bidirectional Monte Carlo
+    (default: forward chain with linear schedule).
 
-class AIS(object):
-    def __init__(self, model, dataset, optimizer = None,
-                 data_len = None, num_samples = 5, num_beta = 500, nprint = 25):
+    Args:
+        model (vae.VAE): VAE model
+        loader (iterator): iterator that returns pairs, with first component being `x`,
+            second would be `z` or label (will not be used)
+        mode (string): indicate forward/backward chain; must be either `forward` or 'backward'
+        schedule (list or 1D np.ndarray): temperature schedule, i.e. `p(z)p(x|z)^t`;
+            foward chain has increasing values, whereas backward has decreasing values
+        n_sample (int): number of importance samples (i.e. number of parallel chains 
+            for each datapoint)
 
-        #store required things
-        self.model = model
-        self.model_init_params = copy.deepcopy(model.state_dict())
-        self.dataset = dataset
+    Returns:
+        A list where each element is a torch.autograd.Variable that contains the 
+        log importance weights for a single batch of data
+    """
 
-        if data_len is None:
-            self.data_len = 1
+    assert mode == 'forward' or mode == 'backward', 'Should have either forward/backward mode'
+
+    def log_f_i(z, data, t, log_likelihood_fn=log_bernoulli):
+        """Unnormalized density for intermediate distribution `f_i`:
+            f_i = p(z)^(1-t) p(x,z)^(t) = p(z) p(x|z)^t
+        =>  log f_i = log p(z) + t * log p(x|z)
+        """
+        zeros = torch.zeros(B, z_size, dtype = z.dtype, device = z.device)
+        log_prior = log_normal(z, zeros, zeros)
+        log_likelihood = log_likelihood_fn(model.decode(z), data)
+
+        return log_prior + log_likelihood.mul_(t)
+
+    # shorter aliases
+    try:
+        z_size = model.hps.z_size
+    except:
+        try:
+            z_size = model.z_dim
+        except:
+            z_size = model.zdim
+    #mdtype = model.dtype
+
+    _time = time.time()
+    logws = []  # for output
+
+    print ('In %s mode' % mode)
+
+    for i, (batch, post_z) in enumerate(loader):
+
+        B = batch.size(0) * n_sample
+        batch = safe_repeat(batch, n_sample)
+        # batch of step sizes, one for each chain
+        epsilon = torch.ones(B, dtype = batch.dtype, device = batch.device).mul_(0.01)
+        # accept/reject history for tuning step size
+        accept_hist = torch.zeros(B, dtype = batch.dtype, device = batch.device)
+
+        # record log importance weight; volatile=True reduces memory greatly
+        logw = torch.zeros(B, dtype = batch.dtype, device = batch.device)
+        logw.requires_grad = False
+
+        # initial sample of z
+        if mode == 'forward':
+            current_z = torch.randn(B, z_size, dtype=batch.dtype, device = batch.device)
+            current_z.requires_grad = True
         else:
-            self.data_len = data_len
-        self.num_samples = num_samples
-        self.num_beta = num_beta
-        self.nprint = nprint
+            current_z = safe_repeat(post_z, n_sample).type(batch.dtype).device(batch.device)
+            current_z.requires_grad = True
 
-        #store schedule and reverse schedule
-        self.schedule = get_schedule(num_beta)
-        self.rev_schedule = torch.Tensor(self.schedule[::-1].copy())
-        #self.schedule = torch.from_numpy(self.schedule).float()
+        for j, (t0, t1) in tqdm(enumerate(zip(schedule[:-1], schedule[1:]), 1)):
+            # update log importance weight
+            log_int_1 = log_f_i(current_z, batch, t0).data
+            log_int_2 = log_f_i(current_z, batch, t1).data
+            logw.data.add_(log_int_2 - log_int_1)
 
-        #store optimizer
-        if optimizer is None:
-            self.optimizer = torch.optim.Adam(self.model.parameters(), lr = 1e-6, amsgrad = True)
-        else:
-            self.optimizer = optimizer
+            del log_int_1, log_int_2
 
-    def ais_step(self, schedule, log_prob, input_data, backwards = False):
-        r"""
-        schedule: annealing schedule
-        backwards: number of data points to draw if/when we are sampling simulated data in the backwards setting
-        """
-        logw_k = 0.0
+            # resample speed
+            current_v = torch.randn(current_z.size(), dtype=batch.dtype, device=batch.device, requires_grad = False)
 
-        #compute maximum number of epochs
+            def U(z):
+                return -log_f_i(z, batch, t1)
 
-        #print(self.num_beta/data_len)
-        max_epochs = math.ceil(self.num_beta/self.data_len)
-        print('Maximum Number of Epochs: ', max_epochs)
+            def grad_U(z):
+                # grad w.r.t. outputs; mandatory in this case
+                grad_outputs = torch.ones(B, dtype = batch.dtype, device = batch.device)
+                grad = torchgrad(U(z), z, grad_outputs=grad_outputs)[0]
+                # clip by norm
+                grad = torch.clamp(grad, -B*z_size*100, B*z_size*100)
+                grad.requires_grad = True
+                return grad
 
-        #iterate through number of samples
-        b = 0
-        num_epochs = 0
+            def normalized_kinetic(v):
+                zeros = torch.zeros(B, z_size, dtype = batch.dtype, device = batch.device)
+                # this is superior to the unnormalized version
+                return -log_normal(v, zeros, zeros)
 
-        while b < (self.num_beta-2):
-            if num_epochs%self.nprint is 0 and b > 0:
-                print('Epoch: ', num_epochs, '/', max_epochs, ' Current ll:', logw_k.cpu().numpy())
+            
+            z, v = hmc_trajectory(current_z, current_v, U, grad_U, epsilon)
 
-                #only print acceptance rate if we're using HMC
-                if self.optimizer.__class__.__name__ is 'HMC':
-                    print('Current Acceptance Rate: ', self.optimizer.acc_rate())
+            # accept-reject step
+            current_z, epsilon, accept_hist = accept_reject(current_z, current_v,
+                                                            z, v,
+                                                            epsilon,
+                                                            accept_hist, j,
+                                                            U, K=normalized_kinetic)
 
-            for _, data in enumerate(input_data):
-                #put breaking condition in so we don't crap out
-                if b+1 == self.num_beta:
-                    break
+        # IWAE lower bound
+        logw = log_mean_exp(logw.view(n_sample, -1).transpose(0, 1))
+        print(logw.size())
+        if mode == 'backward':
+            logw = -logw
 
-                t0 = schedule[b]
-                t1 = schedule[b+1]
+        logws.append(logw.data)
 
-                def closure():
-                    self.optimizer.zero_grad()
+        print ('Time elapse %.4f, last batch stats %.4f' % (time.time()-_time, logw.mean().cpu().data.numpy()))
+        _time = time.time()
 
-                    #perform log weight update
-                    #use negative here so we can use optimizer to minimize it
-                    loss = -log_prob(t1, data, backwards)
-                    #perform transition update based on loss
-                    loss.backward()
-
-                    return loss
-
-                with torch.no_grad():
-                    update = log_prob(t1, data, backwards) - log_prob(t0, data, backwards)
-                    logw_k += update
-
-                self.optimizer.step(closure)
-
-                b += 1
-            num_epochs += 1
-
-        return logw_k
-
-    def run_forward(self, log_prob_fn):
-        r"""
-        x: our data
-        forwards direction: anneal from prior to unnormalized posterior
-        log prob is set up for bayesian inference case
-        """
-        model_state_list = [None] * self.num_samples
-
-        for k in range(self.num_samples):
-            print('Sample: ', k)
-
-            #reload from initial state dict
-            self.model.load_state_dict(self.model_init_params)
-
-
-            #perform ais inner loop through schedule
-            logw_k = self.ais_step(self.schedule, log_prob_fn, self.dataset)
-
-            #save current model state in forwards step
-            tmp = self.model.state_dict()
-            model_state_list[k] = copy.deepcopy(tmp)
-
-            if k is 0:
-                logw = logw_k
-            else:
-                # print(logw.size(), logw_k.size())
-                logw = torch.cat((logw.view(-1), logw_k.view(-1)),0)
-
-        logw_total = -math.log(self.num_samples) + LogSumExp(logw)
-
-        return logw_total, logw, model_state_list
-
-    def run_backward(self, log_prob_fn):
-        r"""
-        x: our data
-        reverse direction: anneal from posterior back to prior
-        again, log prob is set up for bayesian inference case
-        """
-
-        #preinitialize
-        model_state_list = [None] * self.num_samples
-
-        for k in range(self.num_samples):
-            print('Sample: ', k)
-
-            #generate new sample for model parameters, initial pt is N(0, 0.5^2)
-            self.model.load_state_dict(self.model_init_params)
-
-            #perform ais inner loop through schedule
-            logw_k = self.ais_step(self.rev_schedule, log_prob_fn, self.dataset, True)
-
-            #save current model state in forwards step
-            model_state_list[k] = self.model.state_dict()
-
-            if k is 0:
-                logw = logw_k
-            else:
-                logw = torch.cat((logw.view(-1), logw_k.view(-1)),0)
-
-        logw_total = math.log(self.num_samples) - LogSumExp(logw)
-
-        return logw_total, logw, model_state_list
+    return logws

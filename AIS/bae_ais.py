@@ -22,6 +22,8 @@ import sys
 sys.path.append('..')
 from bae_model import BAE
 
+import os
+
 parser = argparse.ArgumentParser(description='AIS with bayesian auto-encoder')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
@@ -30,12 +32,13 @@ parser.add_argument('--zdim', type=int, default = 20, metavar = 'S',
                     help='latent + noise dimension to use in model')
 parser.add_argument('--num-steps', type=int, default = 500, help = 'number of steps to run AIS for')
 parser.add_argument('--num-samples', type=int, default = 16, help='number of chains to run AIS over')
-parser.add_argument('--device', type=int, default = 0, help = 'device')
 parser.add_argument('--data_path', type=str, default='/scratch/datasets/', help='location of mnist dataset')
 
 args = parser.parse_args()
 kwargs = {'num_workers': 1, 'pin_memory': True}
 
+torch.backends.cudnn.benchmark = True
+torch.manual_seed(1)
 to_bernoulli = lambda x: transforms.ToTensor()(x).bernoulli()
 
 #use a variant of test loader so we don't have to re-generate the batch stuff
@@ -44,11 +47,13 @@ test_loader = torch.utils.data.DataLoader(
     batch_size=10000, shuffle=True, **kwargs)
 
 for (data, label) in test_loader:
-    test_tensor_list = (data.to(args.device), label.to(args.device))
+    test_tensor_list = (data.cuda(async=False), label.cuda(async=False))
 class myiterator:
     def __iter__(self):
         return iter([test_tensor_list])
 new_test_loader = myiterator()
+
+
 
 x_dim = 784
 z_dim = 20
@@ -56,14 +61,22 @@ hidden_dim = 400
 
 model = BAE(x_dim,z_dim,hidden_dim)
 
-model.to(args.device)
-model_state_dict = torch.load(args.file)
+model_state_dict = torch.load(args.file, map_location=lambda storage, loc: storage)
+
 model.load_state_dict(model_state_dict)
-#model.cuda()
+
+
+torch.cuda.empty_cache()
+
+del model_state_dict
+
+model.cuda()
+
+
 
 #create the prior distribution for z
-pmean = torch.zeros(z_dim).to(args.device)
-pstd = torch.ones(z_dim).to(args.device)
+pmean = torch.zeros(z_dim).cuda()
+pstd = torch.ones(z_dim).cuda()
 priordist = torch.distributions.Normal(pmean, pstd)
 
 def geom_average_loss(t1, data, backwards = False):
@@ -72,13 +85,10 @@ def geom_average_loss(t1, data, backwards = False):
     data: data tensor
     backwards: if we draw a simulated model and use that instead of the real data
     """
-    #pass t1 to current device if necessary
-    #t1 = t1.to(args.device)
-
     #want to calculate log(q(z|x)^(1-t1) p(x,z)^t1)
     data, _ = data
     data = data.view(-1, 784)
-    #data = data.view(-1,784).to(args.device)
+
 
     #backwards pass ignores the data argument and samples generatively
     if backwards:
@@ -108,9 +118,11 @@ def geom_average_loss(t1, data, backwards = False):
         param_dist = td.Normal(torch.zeros_like(param), torch.ones_like(param))
         theta_loss += param_dist.log_prob(param).sum()
 
-    #print(recon_loss.mul(t1).size(), prior_loss.size(), theta_loss.size())
     total_loss = (recon_loss.mul(t1) + prior_loss).sum() + theta_loss/10000.
-    return total_loss.sum()
+
+    total_loss = total_loss.sum()
+    torch.cuda.synchronize()
+    return total_loss
 
 #note, right now im using adam as the transition operator, which i won't be doing.
 #ill be using HMC in the future
@@ -124,6 +136,7 @@ print(sampler.acc_rate())
 print(logprob_vec)
 print('Lower bound estimate: ' + str(logprob_est/10000.))
 
+torch.save(logprob_vec, 'bae_log_prob_vec.pt')
 # print('Now running backward AIS')
 # blogprob_est, blogprob_vec, _ = ais_for_vae.run_backward(geom_average_loss)
 
