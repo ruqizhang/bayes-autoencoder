@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
+__all__ = ['VAE_LSTM']
+
 class Encode(nn.Module):
 
     def __init__(self,x_dim,z_dim,hidden_dim,vocab_size,dropout):
@@ -68,11 +70,11 @@ class Decode(nn.Module):
         recon_batch = self.fc4(ht)
         return recon_batch
 
-class VAE(nn.Module):
+class VAE_LSTM(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
     def __init__(self, rnn_type, ntoken, ninp, nhid, z_dim,nlayers, device_id, bsz,dropout=0.5, tie_weights=False):
-        super(VAE, self).__init__()
+        super(VAE_LSTM, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.word_embeddings = nn.Embedding(ntoken, ninp)
         self.encoder = Encode(ninp,z_dim,nhid,ntoken,dropout)

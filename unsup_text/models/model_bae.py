@@ -3,31 +3,45 @@ import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
 
-__all__ = ['BVAE_LSTM']
+__all__ = ['BAE_LSTM']
+
 class Encode(nn.Module):
 
-    def __init__(self,x_dim,z_dim,hidden_dim,vocab_size,dropout):
+    def __init__(self,x_dim,z_dim,hidden_dim,vocab_size,dropout,bsz,device_id):
         super(Encode, self).__init__()
         self.x_dim = x_dim
+        self.z_dim = z_dim
         self.hidden_dim = hidden_dim
+        self.bsz = bsz
+        self.device_id = device_id
         self.lstm = nn.LSTM(x_dim, hidden_dim,dropout=dropout)
         self.fc21 = nn.Linear(hidden_dim, z_dim) #mean
-        self.fc22 = nn.Linear(hidden_dim, z_dim) #logvar
+        # self.fc22 = nn.Linear(hidden_dim, z_dim) #logvar
         self.drop = nn.Dropout(dropout)
+        self.fc5 = nn.Linear(z_dim,hidden_dim)
         self.init_weights()
     def init_weights(self):
         initrange = 0.1
         self.fc21.bias.data.fill_(0)
         self.fc21.weight.data.uniform_(-initrange, initrange)
-        self.fc22.bias.data.fill_(0)
-        self.fc22.weight.data.uniform_(-initrange, initrange)
+        self.fc5.bias.data.fill_(0)
+        self.fc5.weight.data.uniform_(-initrange, initrange)
+    def noise(self):
+        xi = Variable(torch.randn(self.bsz,self.z_dim).cuda(self.device_id),requires_grad=True)
+        return xi
+
     def forward(self, x):
-        lstm_out, _ = self.lstm(x)
+        c0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
+        xi = self.noise()
+        h0 = self.fc5(xi)
+        h0 = h0.unsqueeze(0)
+        # h0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
+        s0 = (h0,c0)
+        lstm_out, _ = self.lstm(x,s0)
         lstm_out = lstm_out[-1,:,:]
         lstm_out = self.drop(lstm_out)
-        mu = self.fc21(lstm_out)
-        logvar = self.fc22(lstm_out)
-        return mu, logvar
+        z = self.fc21(lstm_out)
+        return z,xi
 
 class Decode(nn.Module):
 
@@ -60,43 +74,33 @@ class Decode(nn.Module):
         recon_batch = self.fc4(ht)
         return recon_batch
 
-class BVAE_LSTM(nn.Module):
+class BAE_LSTM(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
     def __init__(self, rnn_type, ntoken, ninp, nhid, z_dim,nlayers, device_id, bsz,dropout=0.5, tie_weights=False):
-        super(BVAE_LSTM, self).__init__()
+        super(BAE_LSTM, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.word_embeddings = nn.Embedding(ntoken, ninp)
-        self.encoder = Encode(ninp,z_dim,nhid,ntoken,dropout)
+        self.encoder = Encode(ninp,z_dim,nhid,ntoken,dropout,bsz,device_id)
         self.decoder = Decode(ninp,z_dim,nhid,ntoken,dropout,bsz,device_id)
         self.rnn_type = rnn_type
         self.nhid = nhid
         self.nlayers = nlayers
         self.device_id = device_id
         self.bsz = bsz
-        self.ntoken = ntoken
+        self.embed = nn.Sequential(
+            self.word_embeddings,
+            self.drop)
         self.init_weights()
     def init_weights(self):
         initrange = 0.1
         self.word_embeddings.weight.data.uniform_(-initrange, initrange)
 
-
-    def reparameterize(self, mu, logvar):
-        if self.training:
-          std = logvar.mul(0.5).exp_()
-          eps = Variable(std.data.new(std.size()).normal_())
-          eps.cuda(self.device_id)
-          return eps.mul(std).add_(mu)
-        else:
-          return mu
-
     def forward(self, input):
-        emb = self.drop(self.word_embeddings(input))
-        mu,logvar = self.encoder(emb)
-
-        z = self.reparameterize(mu, logvar)
+        emb = self.embed(input)
+        z,xi = self.encoder(emb)
         recon_batch = self.decoder(emb,z)
-        return recon_batch, mu,logvar
+        return recon_batch,z,xi
 
     def prior_loss(self,prior_std):
         prior_loss = 0.0
@@ -126,3 +130,10 @@ class BVAE_LSTM(nn.Module):
         decoder_output = self.decoder.fc4(decoder_output[-1])
 
         return decoder_output, decoder_hidden
+    # def init_hidden(self, bsz):
+    #     weight = next(self.parameters()).data
+    #     if self.rnn_type == 'LSTM':
+    #         return (Variable(weight.new(self.nlayers, bsz, self.nhid).zero_()),
+    #                 Variable(weight.new(self.nlayers, bsz, self.nhid).zero_()))
+    #     else:
+    #         return Variable(weight.new(self.nlayers, bsz, self.nhid).zero_())
