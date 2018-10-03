@@ -25,6 +25,7 @@ import unsup_images.models as image_models
 
 #from hparams import get_default_hparams
 from torchvision import datasets, transforms
+import itertools
 
 import argparse
 
@@ -119,13 +120,20 @@ if args.dataset == 'ptb':
         data = data.cuda(async=True)
         return data
 
-    #eval batch size is hardcoded to 64 to match old bae_ais.py script
-    loader = batchify(corpus.test, 64) 
-    
+    loader_batches = batchify(corpus.test, 64)[0:35, :]
+
+    def get_batch(i, source=loader_batches, evaluation=False):
+        seq_len = min(35, len(source) - 1 - i)
+        data = Variable(source[i:i+seq_len], volatile=evaluation)
+        target = Variable(source[i+1:i+1+seq_len].view(-1))
+        return data, target
+
+    loader = itertools.starmap(get_batch, zip(range(35)))
+
     print('Using model %s' % args.model)
     model_cfg = getattr(text_models, args.model)
 
-    model = model_cfg.base(*model_cfg.args, zdim = args.zdim, ntoken = len(corpus.dictionary),
+    model = model_cfg.base('main_bae', *model_cfg.args, zdim = args.zdim, ntoken = len(corpus.dictionary),
                             ninp = 200, nhid = 200, nlayers = 2, device_id = 0, bsz = 64)
 
 def main(f=args.file):

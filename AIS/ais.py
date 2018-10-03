@@ -30,14 +30,14 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
     assert mode == 'forward' or mode == 'backward', 'Should have either forward/backward mode'
 
-    def log_f_i(z, data, t, log_likelihood_fn=log_bernoulli):
+    def log_f_i(z, emb, data, t, log_likelihood_fn=log_bernoulli):
         """Unnormalized density for intermediate distribution `f_i`:
             f_i = p(z)^(1-t) p(x,z)^(t) = p(z) p(x|z)^t
         =>  log f_i = log p(z) + t * log p(x|z)
         """
         zeros = torch.zeros(B, z_size, dtype = z.dtype, device = z.device)
         log_prior = log_normal(z, zeros, zeros)
-        log_likelihood = log_likelihood_fn(model.decode(z), data)
+        log_likelihood = log_likelihood_fn(model.decode(z, emb), data)
 
         return log_prior + log_likelihood.mul_(t)
 
@@ -56,33 +56,36 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
     print ('In %s mode' % mode)
 
-    for i, (batch, post_z) in enumerate(loader):
-
+    for (batch, target) in loader:
         B = batch.size(0) * n_sample
         batch = safe_repeat(batch, n_sample)
+
+        d0 = batch.size(0)
+        d1 = batch.size(1)
+
+        data = torch.zeros(d0*d1,10000, device = batch.device)
+        data[range(d0*d1),batch.view(-1)]=1
+        data = data.view(d0,d1,10000)
+        
         # batch of step sizes, one for each chain
         epsilon = torch.ones(B, dtype = batch.dtype, device = batch.device).mul_(0.01)
         # accept/reject history for tuning step size
-        accept_hist = torch.zeros(B, dtype = batch.dtype, device = batch.device)
+        accept_hist = torch.zeros(B, dtype = batch.dtype, device = batch.device).float()
 
         # record log importance weight; volatile=True reduces memory greatly
-        logw = torch.zeros(B, dtype = batch.dtype, device = batch.device)
+        logw = torch.zeros(B, dtype = batch.dtype, device = batch.device).float()
         logw.requires_grad = False
 
         # initial sample of z
-        if mode == 'forward':
-            current_z = torch.randn(B, z_size, dtype=batch.dtype, device = batch.device)
-            #current_z = model.encode(batch)
-            #current_z.detach_()
-            current_z.requires_grad = True
-        else:
-            current_z = safe_repeat(post_z, n_sample).type(batch.dtype).device(batch.device)
-            current_z.requires_grad = True
+        current_z = torch.ones(B, z_size, dtype=batch.dtype, device = batch.device).float().normal_()
+        current_z.requires_grad = True
 
         for j, (t0, t1) in tqdm(enumerate(zip(schedule[:-1], schedule[1:]), 1)):
+            emb = model.embed(batch)
+            
             # update log importance weight
-            log_int_1 = log_f_i(current_z, batch, t0).data
-            log_int_2 = log_f_i(current_z, batch, t1).data
+            log_int_1 = log_f_i(current_z, emb, data, t0).data
+            log_int_2 = log_f_i(current_z, emb, data, t1).data
             logw.data.add_(log_int_2 - log_int_1)
 
             del log_int_1, log_int_2
@@ -91,7 +94,7 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
             current_v = torch.randn(current_z.size(), dtype=batch.dtype, device=batch.device, requires_grad = False)
 
             def U(z):
-                return -log_f_i(z, batch, t1)
+                return -log_f_i(z, emb, data, t1)
 
             def grad_U(z):
                 # grad w.r.t. outputs; mandatory in this case
