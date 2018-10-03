@@ -13,15 +13,15 @@ from torch.autograd import Variable
 from torch.autograd import grad as torchgrad
 from ais import ais_trajectory
 from simulate import simulate_data
-from vae import VAE
+#from vae import VAE
 from utils import sigmoidal_schedule
 
 import sys
 sys.path.append('..')
-from unsup_text.models import *
-#from bae import BAE
-sys.path.append('/nfs01/wm326/bvae/vae_images')
-from mnist_unsup.models import *
+import unsup_text.models as text_models
+import unsup_images.models as image_models
+#sys.path.append('/nfs01/wm326/bvae/')
+#import vae_images.mnist_unsup.models as image_models
 
 #from hparams import get_default_hparams
 from torchvision import datasets, transforms
@@ -41,7 +41,7 @@ parser.add_argument('--data_path', type=str, default='/scratch/datasets/', help=
 args = parser.parse_args()
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(1)
-to_bernoulli = lambda x: transforms.ToTensor()(x).bernoulli()
+
 
 def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_sample=100):
     """Bidirectional Monte Carlo. Integrate forward and backward AIS.
@@ -75,11 +75,14 @@ def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_samp
     return forward_logws
 
 if args.dataset == 'MNIST':
+    to_bernoulli = lambda x: transforms.ToTensor()(x).bernoulli()
+
     #use a variant of test loader so we don't have to re-generate the batch stuff
     test_loader = torch.utils.data.DataLoader(
-        datasets.MNIST('/scratch/datasets', train=False, transform=to_bernoulli, download=True),
+        datasets.MNIST(args.data_path, train=False, transform=to_bernoulli, download=True),
         batch_size=10000, shuffle=True)
 
+    # store data + label on cuda for speed
     for (data, label) in test_loader:
         test_tensor_list = (data.cuda(async=False).view(-1, 784), label.cuda(async=False))
     class myiterator:
@@ -88,9 +91,12 @@ if args.dataset == 'MNIST':
 
     loader = myiterator()
 
+    print('Using model %s' % args.model)
+    model_cfg = getattr(image_models, args.model)
+
 if args.dataset == 'ptb':
-    import unsup_text.data as data
-    corpus = data.Corpus('../datasets/ptb') #change this line if necessary
+    import unsup_text.data as text_data
+    corpus = text_data.Corpus(args.data_path)
 
     def batchify(data, bsz):
         # Work out how cleanly we can divide the dataset into bsz parts.
@@ -103,21 +109,22 @@ if args.dataset == 'ptb':
             data = data.cuda(async=True)
         return data
 
-    loader = batchify(corpus.test, eval_batch_size)
-
-hps = {'dim':784,'zdim':args.zdim,'hidden':500,'noise_dim':args.zdim}
-#hps = {'z_dim':args.zdim, 'noise_dim':args.zdim, 'dim':784}
+    #eval batch size is hardcoded to 64 to match old bae_ais.py script
+    loader = batchify(corpus.test, 64) 
+    
+    print('Using model %s' % args.model)
+    model_cfg = getattr(text_models, args.model)
 
 def main(f=args.file):
-    #hps = get_default_hparams()
-    #model = VAE(hps)
-    if args.model == 'VAE':
-        model = VAE(**hps)
-    if args.model == 'BAE':
-        model = BayesAE(**hps)
-
-    # load model
+    print('Preparing model')
+    print(*model_cfg.args)
+    print('using ', args.zdim, ' latent space')
+    model = model_cfg.base(*model_cfg.args, zdim=args.zdim, **model_cfg.kwargs)
+    #model.to(args.device)
     model.cuda()
+    #model.device = args.device
+    
+    print('Loading provided model')
     # there may be discrepancies in how the model was saved
     try:
         model_state_dict = torch.load(f, map_location=lambda storage, loc: storage)['state_dict']
@@ -129,6 +136,7 @@ def main(f=args.file):
     model.eval()
 
     # run num_steps of AIS in batched mode with num_samples chains    
+    # sigmoidal schedule is typically used
     forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples)
 
 
