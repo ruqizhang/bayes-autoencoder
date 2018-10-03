@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
 
-__all__ = ['BAE_LSTM']
+__all__ = ['BAE']
 
 class Encode(nn.Module):
 
@@ -25,7 +25,7 @@ class Encode(nn.Module):
         self.fc21.bias.data.fill_(0)
         self.fc21.weight.data.uniform_(-initrange, initrange)
         self.fc5.bias.data.fill_(0)
-        self.fc5.weight.data.uniform_(-initrange, initrange)
+        self.fc5.welstmight.data.uniform_(-initrange, initrange)
     def noise(self):
         xi = Variable(torch.randn(self.bsz,self.z_dim).cuda(self.device_id),requires_grad=True)
         return xi
@@ -138,8 +138,6 @@ class BAE_LSTM(nn.Module):
         decoder_output = self.decoder.fc4(decoder_output[-1])
 
         return decoder_output, decoder_hidden
-
-    #def decode(self, input):
 
 class BAE:
     args = list()
