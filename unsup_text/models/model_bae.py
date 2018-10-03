@@ -2,9 +2,6 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
-
-__all__ = ['BAE']
-
 class Encode(nn.Module):
 
     def __init__(self,x_dim,z_dim,hidden_dim,vocab_size,dropout,bsz,device_id):
@@ -74,34 +71,26 @@ class Decode(nn.Module):
         recon_batch = self.fc4(ht)
         return recon_batch
 
-class BAE_LSTM(nn.Module):
+class VAE(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, ntoken, ninp, nhid, zdim, nlayers, device_id, bsz,dropout=0.5, tie_weights=False):
-        super(BAE_LSTM, self).__init__()
-        self.zdim = zdim
-
+    def __init__(self, rnn_type, ntoken, ninp, nhid, z_dim,nlayers, device_id, bsz,dropout=0.5, tie_weights=False):
+        super(VAE, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.word_embeddings = nn.Embedding(ntoken, ninp)
-
-        self.encoder = Encode(ninp,zdim,nhid,ntoken,dropout,bsz,device_id)
-        self.decoder = Decode(ninp,zdim,nhid,ntoken,dropout,bsz,device_id)
-        
+        self.encoder = Encode(ninp,z_dim,nhid,ntoken,dropout,bsz,device_id)
+        self.decoder = Decode(ninp,z_dim,nhid,ntoken,dropout,bsz,device_id)
+        self.rnn_type = rnn_type
         self.nhid = nhid
         self.nlayers = nlayers
         self.device_id = device_id
         self.bsz = bsz
-        
         self.embed = nn.Sequential(
             self.word_embeddings,
             self.drop)
-        
         self.init_weights()
-        
-    
     def init_weights(self):
         initrange = 0.1
-        #self.zdim = zdim
         self.word_embeddings.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, input):
@@ -131,15 +120,17 @@ class BAE_LSTM(nn.Module):
                                requires_grad = False))
         #print('noise_loss',noise_loss)#1e-8
         return noise_loss
-
     def generate(self, decoder_input, decoder_hidden):
         emb = self.word_embeddings(decoder_input)
         decoder_output, decoder_hidden = self.decoder.lstm(emb.unsqueeze(0), decoder_hidden)
+        #decoder_output = self.drop(decoder_output)
         decoder_output = self.decoder.fc4(decoder_output[-1])
 
         return decoder_output, decoder_hidden
-
-class BAE:
-    args = list()
-    kwargs = {'dropout':0.5, 'tie_weights':False}
-    base = BAE_LSTM
+    # def init_hidden(self, bsz):
+    #     weight = next(self.parameters()).data
+    #     if self.rnn_type == 'LSTM':
+    #         return (Variable(weight.new(self.nlayers, bsz, self.nhid).zero_()),
+    #                 Variable(weight.new(self.nlayers, bsz, self.nhid).zero_()))
+    #     else:
+    #         return Variable(weight.new(self.nlayers, bsz, self.nhid).zero_())
