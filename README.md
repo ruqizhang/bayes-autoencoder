@@ -1,12 +1,8 @@
-under construction
+under construction - so far all implemented models have been tested for running, but not for accuracy
 
-train_unsup.py should be working for pytorch0.4+
+Example train_semisup.py call:
+  python train_semisup.py --dataset MNIST --data_path /scratch/datasets/ --epochs 3 --model SSBAE --dir exps/test --optimizer SGHMC --optimizer_options lr=1e-7 --save-epochs 1
 
-place new models in models/ directory as in vae.py
-
-currently all models should be able to be called from either train_unsup.py or train_semisup.py
-  - unclear if we should just have each model class have its own separate loss function?
-
-Repo for "An Exploration of Bayesian Methods for Auto-Encoders,"
-
+Example train_unsup.py call:
+  python train_unsup.py --dataset MNIST --data_path /scratch/datasets/ --epochs 3 --model SSBAE --dir exps/test --optimizer SGHMC --optimizer_options lr=1e-7 --save-epochs 1
 
