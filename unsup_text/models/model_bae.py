@@ -77,15 +77,17 @@ class Decode(nn.Module):
 class BAE_LSTM(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, ntoken, ninp, nhid, zdim, nlayers, device_id, bsz,dropout=0.5, tie_weights=False):
+    def __init__(self, rnn_type, ntoken, ninp, nhid, zdim, nlayers, device_id, bsz,dropout=0.5, tie_weights=False):
         super(BAE_LSTM, self).__init__()
         self.zdim = zdim
 
         self.drop = nn.Dropout(dropout)
         self.word_embeddings = nn.Embedding(ntoken, ninp)
-
+        self.rnn_type = rnn_type
         self.encoder = Encode(ninp,zdim,nhid,ntoken,dropout,bsz,device_id)
         self.decoder = Decode(ninp,zdim,nhid,ntoken,dropout,bsz,device_id)
+        
+        self.decode = self.decoder
         
         self.nhid = nhid
         self.nlayers = nlayers
@@ -104,6 +106,11 @@ class BAE_LSTM(nn.Module):
         #self.zdim = zdim
         self.word_embeddings.weight.data.uniform_(-initrange, initrange)
 
+    def encode(self, input):
+        emb = self.embed(input)
+        z, _ = self.encoder(emb)
+        return z
+        
     def forward(self, input):
         emb = self.embed(input)
         z,xi = self.encoder(emb)
