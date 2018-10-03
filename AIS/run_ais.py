@@ -91,8 +91,18 @@ if args.dataset == 'MNIST':
 
     loader = myiterator()
 
-    print('Using model %s' % args.model)
-    model_cfg = getattr(image_models, args.model)
+    if args.model=='BAEv2':
+        from bae import BAE
+        model = BAE(x_dim=784,z_dim=args.zdim,hidden_dim=400)
+    else:
+        print('Using model %s' % args.model)
+        model_cfg = getattr(image_models, args.model)
+
+        print('Preparing model')
+        print(*model_cfg.args)
+        print('using ', args.zdim, ' latent space')
+        model = model_cfg.base(*model_cfg.args, zdim=args.zdim, **model_cfg.kwargs)
+        
 
 if args.dataset == 'ptb':
     import unsup_text.data as text_data
@@ -105,8 +115,8 @@ if args.dataset == 'ptb':
         data = data.narrow(0, 0, nbatch * bsz)
         # Evenly divide the data across the bsz batches.
         data = data.view(bsz, -1).t().contiguous()
-        if args.cuda:
-            data = data.cuda(async=True)
+        #if args.cuda:
+        data = data.cuda(async=True)
         return data
 
     #eval batch size is hardcoded to 64 to match old bae_ais.py script
@@ -115,11 +125,11 @@ if args.dataset == 'ptb':
     print('Using model %s' % args.model)
     model_cfg = getattr(text_models, args.model)
 
+    model = model_cfg.base(*model_cfg.args, zdim = args.zdim, ntoken = len(corpus.dictionary),
+                            ninp = 200, nhid = 200, nlayers = 2, device_id = 0, bsz = 64)
+
 def main(f=args.file):
-    print('Preparing model')
-    print(*model_cfg.args)
-    print('using ', args.zdim, ' latent space')
-    model = model_cfg.base(*model_cfg.args, zdim=args.zdim, **model_cfg.kwargs)
+
     #model.to(args.device)
     model.cuda()
     #model.device = args.device

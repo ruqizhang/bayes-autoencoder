@@ -25,7 +25,7 @@ class Encode(nn.Module):
         self.fc21.bias.data.fill_(0)
         self.fc21.weight.data.uniform_(-initrange, initrange)
         self.fc5.bias.data.fill_(0)
-        self.fc5.welstmight.data.uniform_(-initrange, initrange)
+        self.fc5.weight.data.uniform_(-initrange, initrange)
     def noise(self):
         xi = Variable(torch.randn(self.bsz,self.z_dim).cuda(self.device_id),requires_grad=True)
         return xi
@@ -101,7 +101,7 @@ class BAE_LSTM(nn.Module):
     
     def init_weights(self):
         initrange = 0.1
-        self.zdim = zdim
+        #self.zdim = zdim
         self.word_embeddings.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, input):
