@@ -5,6 +5,7 @@ import torch
 from torch.autograd import Variable
 import torch.nn.functional as F
 
+from torch.distributions.utils import probs_to_logits
 
 def log_normal(x, mean, logvar):
     """Implementation WITHOUT constant, since the constants in p(z) 
@@ -51,7 +52,7 @@ def log_normal_full_cov(x, mean, L):
     return term1 + term2
 
 
-def log_bernoulli(logit, target):
+def log_bernoulli(probs, target):
     """
     Args:
         logit:  [B, X]
@@ -60,10 +61,9 @@ def log_bernoulli(logit, target):
     Returns:
         output:      [B]
     """
-
+    logit = probs_to_logits(probs, is_binary=True)
     loss = -F.relu(logit) + torch.mul(target, logit) - torch.log(1. + torch.exp( -logit.abs() ))
     loss = torch.sum(loss, 1)
-
     return loss
 
 
@@ -100,3 +100,17 @@ def numpy_nan_guard(arr):
 
 def safe_repeat(x, n):
     return x.repeat(n, *[1 for _ in range(len(x.size()) - 1)])
+
+def sigmoidal_schedule(T, delta=4):
+    """From section 6 of BDMC paper."""
+
+    def sigmoid(x):
+        return np.exp(x) / (1. + np.exp(x))
+
+    def beta_tilde(t):
+        return sigmoid(delta * (2.*t / T - 1.))
+
+    def beta(t):
+        return (beta_tilde(t) - beta_tilde(1)) / (beta_tilde(T) - beta_tilde(1))
+
+    return [beta(t) for t in range(1, T+1)]

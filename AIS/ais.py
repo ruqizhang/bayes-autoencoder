@@ -2,7 +2,6 @@ import numpy as np
 import time
 
 import torch
-from torch.autograd import Variable
 from torch.autograd import grad as torchgrad
 from utils import log_normal, log_bernoulli, log_mean_exp, discretized_logistic, safe_repeat
 from hmc import hmc_trajectory, accept_reject
