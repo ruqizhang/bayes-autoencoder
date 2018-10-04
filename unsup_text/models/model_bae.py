@@ -85,8 +85,8 @@ class BAE_LSTM(nn.Module):
         self.word_embeddings = nn.Embedding(ntoken, ninp)
 
         self.encoder = Encode(ninp,zdim,nhid,ntoken,dropout,bsz,device_id)
-        self.decode = Decode(ninp,zdim,nhid,ntoken,dropout,bsz,device_id)
-        self.decoder = self.decode
+        self.decoder = Decode(ninp,zdim,nhid,ntoken,dropout,bsz,device_id)
+        #self.decode = self.decode
 
         self.nhid = nhid
         self.nlayers = nlayers
@@ -105,6 +105,8 @@ class BAE_LSTM(nn.Module):
         #self.zdim = zdim
         self.word_embeddings.weight.data.uniform_(-initrange, initrange)
 
+    def decode(self, z, emb):
+        return self.decoder(emb, z)
     def forward(self, input):
         emb = self.embed(input)
         z,xi = self.encoder(emb)
