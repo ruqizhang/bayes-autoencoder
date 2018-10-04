@@ -35,9 +35,10 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
             f_i = p(z)^(1-t) p(x,z)^(t) = p(z) p(x|z)^t
         =>  log f_i = log p(z) + t * log p(x|z)
         """
-        zeros = torch.zeros(B, z_size, dtype = z.dtype, device = z.device)
-        log_prior = log_normal(z, zeros, zeros)
-        log_likelihood = log_likelihood_fn(model.decode(z, emb), data)
+        #zeros = torch.zeros(B, z_size, dtype = z.dtype, device = z.device)
+        print(z.size())
+        log_prior = log_normal(z, torch.zeros_like(z), torch.zeros_like(z))
+        log_likelihood = log_likelihood_fn(model.decoder(emb, z), data)
 
         return log_prior + log_likelihood.mul_(t)
 
@@ -56,9 +57,11 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
     print ('In %s mode' % mode)
 
-    for (batch, target) in loader:
-        B = batch.size(0) * n_sample
-        batch = safe_repeat(batch, n_sample)
+    for (batch, _) in loader:
+        
+        B = batch.size(0)
+        #B = batch.size(0) * n_sample
+        #batch = safe_repeat(batch, n_sample)
 
         d0 = batch.size(0)
         d1 = batch.size(1)
@@ -66,6 +69,7 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         data = torch.zeros(d0*d1,10000, device = batch.device)
         data[range(d0*d1),batch.view(-1)]=1
         data = data.view(d0,d1,10000)
+        print(data.size())
         
         # batch of step sizes, one for each chain
         epsilon = torch.ones(B, dtype = batch.dtype, device = batch.device).mul_(0.01)
@@ -81,8 +85,8 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         current_z.requires_grad = True
 
         for j, (t0, t1) in tqdm(enumerate(zip(schedule[:-1], schedule[1:]), 1)):
-            emb = model.embed(batch)
-            
+            emb = model.embed(batch.t())
+
             # update log importance weight
             log_int_1 = log_f_i(current_z, emb, data, t0).data
             log_int_2 = log_f_i(current_z, emb, data, t1).data
