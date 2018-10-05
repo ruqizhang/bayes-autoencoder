@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
 
-__all__ = ['BAE_LSTM']
+__all__ = ['BAE']
 
 class Encode(nn.Module):
 
@@ -101,7 +101,7 @@ class BAE_LSTM(nn.Module):
     
     def init_weights(self):
         initrange = 0.1
-        self.zdim = zdim
+        #self.zdim = zdim
         self.word_embeddings.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, input):
@@ -138,8 +138,6 @@ class BAE_LSTM(nn.Module):
         decoder_output = self.decoder.fc4(decoder_output[-1])
 
         return decoder_output, decoder_hidden
-
-    #def decode(self, input):
 
 class BAE:
     args = list()
