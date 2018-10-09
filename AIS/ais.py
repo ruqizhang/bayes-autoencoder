@@ -36,9 +36,12 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         =>  log f_i = log p(z) + t * log p(x|z)
         """
         #zeros = torch.zeros(B, z_size, dtype = z.dtype, device = z.device)
-        print(z.size())
+        #print('data size: ', data.size())
+        #print('emb size: ', emb.size())
+        #print('latent size: ', z.size())
         log_prior = log_normal(z, torch.zeros_like(z), torch.zeros_like(z))
-        log_likelihood = log_likelihood_fn(model.decoder(emb, z), data)
+        log_likelihood = log_likelihood_fn(model.decoder(emb, z), data).sum(dim=0)
+        #print(log_likelihood.size(), log_prior.size())
 
         return log_prior + log_likelihood.mul_(t)
 
@@ -59,20 +62,20 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
     for (batch, _) in loader:
         
-        B = batch.size(0)
+        B = batch.size(1) * n_sample
         #B = batch.size(0) * n_sample
-        #batch = safe_repeat(batch, n_sample)
+        batch = safe_repeat(batch, n_sample)
 
         d0 = batch.size(0)
-        d1 = batch.size(1)
-
+        #d1 = batch.size(1)
+        d1 = B
+        #print('data size: ', batch.size())
         data = torch.zeros(d0*d1,10000, device = batch.device)
         data[range(d0*d1),batch.view(-1)]=1
         data = data.view(d0,d1,10000)
-        print(data.size())
         
         # batch of step sizes, one for each chain
-        epsilon = torch.ones(B, dtype = batch.dtype, device = batch.device).mul_(0.01)
+        epsilon = torch.ones(B, device = batch.device).mul_(0.01)
         # accept/reject history for tuning step size
         accept_hist = torch.zeros(B, dtype = batch.dtype, device = batch.device).float()
 
@@ -85,7 +88,8 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         current_z.requires_grad = True
 
         for j, (t0, t1) in tqdm(enumerate(zip(schedule[:-1], schedule[1:]), 1)):
-            emb = model.embed(batch.t())
+            print('..')
+            emb = model.embed(batch)
 
             # update log importance weight
             log_int_1 = log_f_i(current_z, emb, data, t0).data
@@ -95,14 +99,15 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
             del log_int_1, log_int_2
 
             # resample speed
-            current_v = torch.randn(current_z.size(), dtype=batch.dtype, device=batch.device, requires_grad = False)
+            #current_v = torch.randn(current_z.size(), dtype=batch.dtype, device=batch.device, requires_grad = False)
+            current_v = torch.ones_like(current_z).normal_()
 
             def U(z):
                 return -log_f_i(z, emb, data, t1)
 
             def grad_U(z):
                 # grad w.r.t. outputs; mandatory in this case
-                grad_outputs = torch.ones(B, dtype = batch.dtype, device = batch.device)
+                grad_outputs = torch.ones(B, device = batch.device)
                 grad = torchgrad(U(z), z, grad_outputs=grad_outputs)[0]
                 # clip by norm
                 grad = torch.clamp(grad, -B*z_size*100, B*z_size*100)
@@ -110,11 +115,10 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
                 return grad
 
             def normalized_kinetic(v):
-                zeros = torch.zeros(B, z_size, dtype = batch.dtype, device = batch.device)
+                zeros = torch.zeros(B, z_size, device = batch.device)
                 # this is superior to the unnormalized version
                 return -log_normal(v, zeros, zeros)
 
-            
             z, v = hmc_trajectory(current_z, current_v, U, grad_U, epsilon)
 
             # accept-reject step
@@ -126,7 +130,6 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
         # IWAE lower bound
         logw = log_mean_exp(logw.view(n_sample, -1).transpose(0, 1))
-        print(logw.size())
         if mode == 'backward':
             logw = -logw
 
