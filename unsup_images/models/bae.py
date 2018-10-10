@@ -27,7 +27,7 @@ class BayesAE(nn.Module):
     
     def decode(self, z):
         return nn.Sigmoid()(self.decoder(z))
-        #return self.decoder(z)
+        #return self.decoder(z) #returns a logit
     
     def forward(self, x):
         x = x.view(-1,self.dim)
@@ -53,7 +53,7 @@ class BayesAE(nn.Module):
         noise_std = noise_std[0]
         for var in self.parameters():
             #means = torch.zeros(var.size()).cuda()
-            means = torch.zeros_like(var)
+            #means = torch.zeros_like(var)
             random_var = torch.ones_like(var).normal_() * noise_std
             #noise_loss += torch.sum(var * Variable(torch.normal(means, std = noise_std).cuda(),
             #                   requires_grad = False))

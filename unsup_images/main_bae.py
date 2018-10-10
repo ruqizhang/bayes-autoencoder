@@ -97,10 +97,11 @@ def repackage_hidden(h):
         return tuple(repackage_hidden(v) for v in h)
 
 def loss_function(recon_batch, x):
-    recon_batch = recon_batch.view(-1,784)
+    # sum(p(x_i | \theta, z))
+    #x = x.view(-1,784)
     #BCE = F.cross_entropy(recon_batch, x)
     l_dist =  torch.distributions.Bernoulli(probs = recon_batch)
-    likelihood = -l_dist.log_prob(x).sum()/x.size(0)
+    likelihood = -l_dist.log_prob(x).mean()
     return likelihood
 
 def en_loss(z_recon,z):
@@ -109,6 +110,8 @@ def en_loss(z_recon,z):
     return loss
 
 def z_prior_loss(z):
+    # sum(p(z_i))
+    # assume a standard normal prior here
     prior_loss = 0.5*torch.sum(z*z)
     return prior_loss
 
@@ -160,21 +163,14 @@ def train():
     model.train()
     total_loss = 0
     start_time = time.time()
-    #ntokens = len(corpus.dictionary)
-    #model.decoder.bsz = args.batch_size
-    # hidden = model.init_hidden(args.batch_size)
-    #for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
+
     for i, (data, _) in enumerate(loaders['train']):
         data = data.view(-1, 784).cuda()
-        #data, targets = get_batch(train_data, i)
 
-        # Starting each batch, we detach the hidden state from how it was previously produced.
-        # If we didn't, the model would try backpropagating all the way to start of the dataset.
-        # hidden = repackage_hidden(hidden)
         for j in range(J):
             if j == 0:
                 model.zero_grad()
-                recon_batch,z,xi = model(data)
+                recon_batch,z,noise = model(data)
                 z_sample = Variable(z.data,requires_grad = True)
                 z_optimizer = z_opt(z_sample)
                 z_optimizer.zero_grad()
@@ -183,15 +179,16 @@ def train():
 
             BCE = loss_function(recon_batch, data)
 
-            prior_loss = model.prior_loss(prior_std)
-            noise_loss = model.noise_loss(lr,alpha)
-            prior_loss /= datasize
-            noise_loss /= datasize
-            prior_loss_z = z_prior_loss(z_sample)
-            noise_loss_z = z_noise_loss(z_sample)
+            prior_loss = model.prior_loss(prior_std) / datasize
+            noise_loss = model.noise_loss(lr,alpha) / datasize
+            #prior_loss /= datasize
+            #noise_loss /= datasize
+            prior_loss_z = z_prior_loss(z_sample) / datasize
+            noise_loss_z = z_noise_loss(z_sample) / datasize
             prior_loss_z /= datasize
             noise_loss_z /= datasize
-            loss = BCE + prior_loss +noise_loss + prior_loss_z + noise_loss_z
+            #print(BCE, prior_loss, noise_loss, prior_loss_z, noise_loss_z)
+            loss = BCE + prior_loss + noise_loss + prior_loss_z + noise_loss_z
 
             if j>burnin:
                 loss_en = en_loss(z_sample,z)
@@ -202,10 +199,10 @@ def train():
             optimizer.step()
             z_optimizer.step()
 
-        total_loss += BCE.data
+        total_loss += loss.item() * data.size(0)
 
         if i % args.log_interval == 0 and i > 0:
-            cur_loss = total_loss.item() / args.log_interval
+            cur_loss = total_loss / args.log_interval
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:5.5f} | ms/batch {:5.2f} | '
                     'loss {:5.2f}'.format(
