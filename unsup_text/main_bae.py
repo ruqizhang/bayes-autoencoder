@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 import data
-import model_bae
+from models.bae import BAE
 import torch.optim as optim
 import numpy as np
 from torch.autograd.gradcheck import zero_gradients
@@ -66,7 +66,7 @@ def batchify(data, bsz):
     # Evenly divide the data across the bsz batches.
     data = data.view(bsz, -1).t().contiguous()
     if args.cuda:
-        data = data.cuda(device_id)
+        data = data.cuda()
     return data
 
 eval_batch_size = args.batch_size
@@ -79,9 +79,9 @@ test_data = batchify(corpus.test, eval_batch_size)
 ###############################################################################
 
 ntokens = len(corpus.dictionary)
-model = model_bae.VAE(args.model, ntokens, args.emsize, args.nhid, args.zdim,args.nlayers,device_id,args.batch_size, args.dropout, args.tied)
+model = BAE.base(ntokens, args.emsize, args.nhid, args.zdim,args.nlayers, args.batch_size, args.dropout, args.tied)
 if args.cuda:
-    model.cuda(device_id)
+    model.cuda()
 
 def repackage_hidden(h):
     """Wraps hidden states in new Variables, to detach them from their history."""
@@ -117,9 +117,11 @@ def z_noise_loss(z):
     noise_std = np.sqrt(2*learning_rate*alpha)
     noise_std = torch.from_numpy(np.array([noise_std])).float().cuda(device_id)
     noise_std = noise_std[0]
-    means = torch.zeros(z.size()).cuda(device_id)
-    noise_loss = torch.sum(z * Variable(torch.normal(means, std = noise_std).cuda(device_id),
-                           requires_grad = False))
+    #means = torch.zeros(z.size()).cuda(device_id)
+    rand_like_z = torch.zeros_like(z).normal_() * noise_std
+    #noise_loss = torch.sum(z * Variable(torch.normal(means, std = noise_std).cuda(device_id),
+    #                       requires_grad = False))
+    noise_loss = torch.sum(z * rand_like_z)
     #print('noise_loss',noise_loss)#1e-8
     return noise_loss
 
