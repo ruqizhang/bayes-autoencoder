@@ -107,20 +107,14 @@ def en_loss(z_recon,z):
     return loss
 
 def z_prior_loss(z):
-    prior_loss = 0.5*torch.sum(z*z)
+    #prior_loss = 0.5*torch.sum(z*z)
+    prior_distribution = torch.distributions.Normal(torch.zeros_like(z), torch.ones_like(z))
+    prior_loss = -prior_distribution.log_prob(z).sum()
     return prior_loss
 
 def z_noise_loss(z):
-
-    learning_rate = lr
-
-    noise_std = np.sqrt(2*learning_rate*alpha)
-    noise_std = torch.from_numpy(np.array([noise_std])).float().cuda(device_id)
-    noise_std = noise_std[0]
-    #means = torch.zeros(z.size()).cuda(device_id)
+    noise_std = (2 * lr * alpha) ** 0.5
     rand_like_z = torch.zeros_like(z).normal_() * noise_std
-    #noise_loss = torch.sum(z * Variable(torch.normal(means, std = noise_std).cuda(device_id),
-    #                       requires_grad = False))
     noise_loss = torch.sum(z * rand_like_z)
     #print('noise_loss',noise_loss)#1e-8
     return noise_loss
@@ -197,7 +191,7 @@ def train():
                 loss += loss_en
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
             optimizer.step()
             z_optimizer.step()
 

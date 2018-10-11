@@ -117,23 +117,17 @@ class BAE_LSTM(nn.Module):
     def prior_loss(self,prior_std):
         prior_loss = 0.0
         for var in self.parameters():
-            nn = torch.div(var, prior_std)
-            prior_loss += torch.sum(nn*nn)
+            prior_dist = torch.distributions.Normal(torch.zeros_like(var), prior_std * torch.ones_like(var))
+            prior_loss += -prior_dist.log_prob(var).sum()
+            #nn = torch.div(var, prior_std)
+            #prior_loss += torch.sum(nn*nn)
         #print('prior_loss',prior_loss)#1e-3
         return 0.5*prior_loss
 
     def noise_loss(self,lr,alpha):
         noise_loss = 0.0
-        # learning_rate = base_lr * np.exp(-lr_decay *min(1.0, (train_iter*args.batch_size)/float(datasize)))
-        #learning_rate = lr
         noise_std = (2.0 * lr * alpha)**0.5
-        #noise_std = np.sqrt(2*learning_rate*alpha)
-        #noise_std = torch.from_numpy(np.array([noise_std])).float().cuda(self.device_id)
-        #noise_std = noise_std[0]
         for var in self.parameters():
-            #means = torch.zeros(var.size()).cuda(self.device_id)
-            #noise_loss += torch.sum(var * Variable(torch.normal(means, std = noise_std).cuda(self.device_id),
-            #                   requires_grad = False))
             rand_like_var = torch.zeros_like(var).normal_() * noise_std
             noise_loss += torch.sum(var * rand_like_var)
         #print('noise_loss',noise_loss)#1e-8
