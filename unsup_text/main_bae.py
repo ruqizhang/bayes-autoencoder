@@ -125,22 +125,6 @@ def z_noise_loss(z):
     #print('noise_loss',noise_loss)#1e-8
     return noise_loss
 
-def compute_jacobian(inputs, output):
-    assert inputs.requires_grad
-    # inputs = inputs.squeeze()
-    num_classes = output.size()[1]
-
-    jacobian = torch.zeros(args.batch_size, inputs.size(1),inputs.size(1)).cuda(device_id)
-    grad_output = torch.zeros(*output.size()).cuda(device_id)
-
-    for i in range(num_classes):
-        zero_gradients(inputs)
-        grad_output.zero_()
-        grad_output[:, i] = 1
-        output.backward(grad_output, retain_variables=True)
-        jacobian[:,i,:] = inputs.grad.view(args.batch_size,1,args.zdim).data
-    return jacobian
-
 def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
     model.eval()
@@ -154,19 +138,7 @@ def evaluate(data_source):
         model.decoder.bsz = eval_batch_size
         recon_batch,z,xi = model(data)
         BCE = loss_function(recon_batch, targets)
-        # jacobian = compute_jacobian(xi,z)
-        # xi = xi.squeeze()
-        # xi_dim = xi.size(1)
-        # q_xi = 1/((2*np.pi)**(xi_dim/2.0))*(torch.sum(xi*xi,1).mul(-0.5).exp())
-        # det = np.linalg.det(jacobian.cpu().numpy())
-        # det = torch.from_numpy(det).cuda(device_id)
-        # log_det = torch.log(det)
-        # det_inverse = 1/det
-        # tem = -q_xi.data*det_inverse*log_det
-        # tem = torch.sum(tem)
-        # xi_entropy = 0.5*np.log(2*np.pi*np.exp(1))
-        # z_entropy = tem+det_inverse*xi_entropy
-        # print(tem,det_inverse,xi_entropy)
+
         loss = BCE
         total_loss += loss.data[0]
         count+=1
@@ -195,26 +167,30 @@ def train():
         # hidden = repackage_hidden(hidden)
         for j in range(J):
             if j == 0:
-                model.zero_grad()
+                optimizer.zero_grad()
+                #model.zero_grad()
                 recon_batch,z,xi = model(data)
                 # jacobian = compute_jacobian(xi,z)
                 z_sample = Variable(z.data,requires_grad = True)
                 z_optimizer = z_opt(z_sample)
                 z_optimizer.zero_grad()
             else:
+                optimizer.zero_grad()
+                z_optimizer.zero_grad()
+
                 emb = model.embed(data)
                 recon_batch = model.decoder(emb,z_sample)
 
             BCE = loss_function(recon_batch, targets)
 
-            prior_loss = model.prior_loss(prior_std)
+            prior_loss = model.prior_loss(prior_std) 
             noise_loss = model.noise_loss(lr,alpha)
             prior_loss /=args.bptt*len(train_data)
             noise_loss /=args.bptt*len(train_data)
             prior_loss_z = z_prior_loss(z_sample)
             noise_loss_z = z_noise_loss(z_sample)
-            prior_loss_z /=args.bptt*len(train_data)
-            noise_loss_z /=args.bptt*len(train_data)
+            prior_loss_z /= z_sample.size(0)
+            noise_loss_z /= z_sample.size(0)
             loss = BCE+ prior_loss+noise_loss+prior_loss_z+noise_loss_z
             if j>burnin:
                 loss_en = en_loss(z_sample,z)
