@@ -53,12 +53,10 @@ parser.add_argument('--log-interval', type=int, default=200, metavar='N',
                     help='report interval')
 parser.add_argument('--save', type=str,  default='model.pt',
                     help='path to save the final model')
-parser.add_argument('--device_id',type = int, help = 'device id to use')
 parser.add_argument('--save_epochs', type = int, help = 'how often to save the model')
 parser.add_argument('--dir', type = str, default = 'directory to save model to')
 
 args = parser.parse_args()
-device_id = args.device_id
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
 args.cuda = True
@@ -84,66 +82,6 @@ model = BAE.base(ntokens, args.emsize, args.nhid, args.zdim,args.nlayers, args.b
 if args.cuda:
     model.cuda()
 
-def train(loader):
-    # Turn on training mode which enables dropout.
-    model.train()
-    total_loss = 0
-    start_time = time.time()
-
-    for batch, (data, targets) in enumerate(loader):
-
-        for j in range(J):
-            if j == 0:
-                optimizer.zero_grad()
-                recon_batch,z,_ = model(data)
-
-                z_sample = Variable(z.data,requires_grad = True)
-                z_optimizer = utils.z_opt(z_sample, lr, alpha)
-                z_optimizer.zero_grad()
-            else:
-                optimizer.zero_grad()
-                z_optimizer.zero_grad()
-
-                if type(model)==models.bae.BAE_LSTM:
-                    emb = model.embed(data)
-                    recon_batch = model.decoder(emb,z_sample)
-                else:
-                    recon_batch = model.decoder(z_sample)
-
-            BCE = utils.loss_function(recon_batch, targets, ntokens)
-
-            prior_loss = model.prior_loss(prior_std) 
-            noise_loss = model.noise_loss(lr,alpha)
-            prior_loss /= len(loader)
-            noise_loss /= len(loader)
-
-            prior_loss_z = utils.z_prior_loss(z_sample)
-            noise_loss_z = utils.z_noise_loss(z_sample, lr, alpha)
-            prior_loss_z /= z_sample.size(0)
-            noise_loss_z /= z_sample.size(0)
-
-            loss = BCE + prior_loss + noise_loss + prior_loss_z + noise_loss_z
-            if j>burnin:
-                loss_en = utils.en_loss(z_sample,z)
-                loss += loss_en
-            loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-            optimizer.step()
-            z_optimizer.step()
-
-        total_loss += BCE.data
-
-        if batch % args.log_interval == 0 and batch > 0:
-            cur_loss = total_loss.item() / args.log_interval
-            elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:5.5f} | ms/batch {:5.2f} | '
-                    'loss {:5.2f} | ppl {:8.2f} '.format(
-                epoch, batch, len(loader.dataset) // args.bptt, lr,
-                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
-            total_loss = 0
-            start_time = time.time()
-
 # Loop over epochs.
 lr = args.lr
 alpha = 0.1
@@ -160,12 +98,15 @@ try:
         epoch_start_time = time.time()
 
         #train
-        train(loaders['train'])
+        utils.train(epoch, loaders['train'], model, optimizer, ntokens, \
+                    lr, alpha, J, burnin, prior_std, args.clip, \
+                    args.log_interval, args.bptt, \
+                    gibbs = False)
 
         #validate
         with torch.no_grad():
             val_loss = utils.evaluate(loaders['valid'], model, ntokens)
-            torch.cuda.synchronize()
+
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
@@ -174,7 +115,6 @@ try:
 
             #test
             test_loss = utils.evaluate(loaders['test'], model, ntokens)
-            torch.cuda.synchronize()
 
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | test loss {:5.2f} | '

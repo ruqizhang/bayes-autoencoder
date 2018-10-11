@@ -1,12 +1,18 @@
 import torch
 import copy
-import math
-
-import torch.nn.functional as F
-
+import math, time
 import itertools
 
+import torch.nn.functional as F
 from torch.autograd import Variable
+
+import models
+
+def z_opt(z_sample, lr, alpha):
+
+    opt = torch.optim.SGD([z_sample], lr=lr, momentum = 1-alpha)
+
+    return opt
 
 def save_model(epoch, model, optimizer, dir):
     print('saving model at epoch ', epoch)
@@ -55,9 +61,78 @@ def evaluate(data_source, model, dim):
     print(' ppl_avg :%g avg_loss:%g ' % (math.exp(avg),avg ))
     return avg
 
-def z_opt(z_sample, lr, alpha):
+def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std, clip, log_interval, bptt, gibbs = False):
+    # Turn on training mode which enables dropout.
+    model.train()
+    total_loss = 0
+    start_time = time.time()
+    epoch_start_time = start_time
 
-    opt = torch.optim.SGD([z_sample], lr=lr, momentum = 1-alpha)
+    for batch, (data, targets) in enumerate(loader):
 
-    return opt
+        for j in range(J):
+            if j == 0:
+                optimizer.zero_grad()
+                recon_batch,z,_ = model(data)
+
+                z_sample = Variable(z.data,requires_grad = True)
+                z_optimizer = z_opt(z_sample, lr, alpha)
+                z_optimizer.zero_grad()
+            else:
+                optimizer.zero_grad()
+                z_optimizer.zero_grad()
+
+                if type(model)==models.bae.BAE_LSTM:
+                    emb = model.embed(data)
+                    recon_batch = model.decoder(emb,z_sample)
+                else:
+                    recon_batch = model.decoder(z_sample)
+
+            BCE = loss_function(recon_batch, targets, dim)
+
+            prior_loss = model.prior_loss(prior_std) 
+            noise_loss = model.noise_loss(lr,alpha)
+            prior_loss /= len(loader)
+            noise_loss /= len(loader)
+
+            prior_loss_z = z_prior_loss(z_sample)
+            noise_loss_z = z_noise_loss(z_sample, lr, alpha)
+            prior_loss_z /= z_sample.size(0)
+            noise_loss_z /= z_sample.size(0)
+
+            loss = BCE + prior_loss + noise_loss + prior_loss_z + noise_loss_z
+            
+            if gibbs:
+                if j>burnin+1:
+                    loss_en = en_loss(z_sample,z)
+                    loss += loss_en
+                if j%2==0:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+                    optimizer.step()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+                    z_optimizer.step()
+            else:
+                if j>burnin:
+                    loss_en = en_loss(z_sample,z)
+                    loss += loss_en
+                loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+            optimizer.step()
+            z_optimizer.step()
+
+        total_loss += BCE.data
+
+        if batch % log_interval == 0 and batch > 0:
+            cur_loss = total_loss.item() / log_interval
+            elapsed = time.time() - start_time
+            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:5.5f} | ms/batch {:5.2f} | '
+                    'loss {:5.2f} | ppl {:8.2f} '.format(
+                epoch, batch, len(loader.dataset) // bptt, lr,
+                elapsed * 1000 / log_interval, cur_loss, math.exp(cur_loss)))
+            total_loss = 0
+            start_time = time.time()
 
