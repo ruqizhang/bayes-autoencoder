@@ -101,7 +101,8 @@ def loss_function(recon_batch, x):
     #x = x.view(-1,784)
     #BCE = F.cross_entropy(recon_batch, x)
     l_dist =  torch.distributions.Bernoulli(probs = recon_batch)
-    likelihood = -l_dist.log_prob(x).mean()
+    likelihood = -l_dist.log_prob(x).sum(dim=1).mean()
+    #print(likelihood.item())
     return likelihood
 
 def en_loss(z_recon,z):
@@ -146,9 +147,9 @@ def evaluate(data_source, epoch, dir):
         recon_batch,z,xi = model(data)
         BCE = loss_function(recon_batch, data)
 
-        loss = BCE + (z_prior_loss(z).sum())/10000.
+        loss = BCE #+ (z_prior_loss(z).sum() / z.size(0))
 
-        total_loss += loss.data[0]
+        total_loss += loss.item()
         count+=1
     avg = total_loss / count
     #print(' ppl_avg :%g avg_loss:%g ' % (math.exp(avg),avg ))
@@ -158,13 +159,13 @@ def z_opt(z_sample):
     opt = optim.SGD([z_sample], lr=lr, momentum = 1-alpha)
     return opt
 
-def train():
+def train(data_source):
     # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0
     start_time = time.time()
 
-    for i, (data, _) in enumerate(loaders['train']):
+    for i, (data, _) in enumerate(data_source):
         data = data.view(-1, 784).cuda()
 
         for j in range(J):
@@ -175,34 +176,36 @@ def train():
                 z_optimizer = z_opt(z_sample)
                 z_optimizer.zero_grad()
             else:
+                model.zero_grad()
+                z_optimizer.zero_grad()
                 recon_batch = model.decoder(z_sample)
 
             BCE = loss_function(recon_batch, data)
 
             prior_loss = model.prior_loss(prior_std) / datasize
             noise_loss = model.noise_loss(lr,alpha) / datasize
-            #prior_loss /= datasize
-            #noise_loss /= datasize
-            prior_loss_z = z_prior_loss(z_sample) / datasize
-            noise_loss_z = z_noise_loss(z_sample) / datasize
-            prior_loss_z /= datasize
-            noise_loss_z /= datasize
+            
+            prior_loss_z = z_prior_loss(z_sample) / z_sample.size(0)
+            noise_loss_z = z_noise_loss(z_sample) / z_sample.size(0)
+            
             #print(BCE, prior_loss, noise_loss, prior_loss_z, noise_loss_z)
-            loss = BCE + prior_loss + noise_loss + prior_loss_z + noise_loss_z
+            loss = BCE #+ prior_loss + noise_loss + prior_loss_z + noise_loss_z
 
             if j>burnin:
                 loss_en = en_loss(z_sample,z)
                 loss += loss_en
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
             optimizer.step()
             z_optimizer.step()
 
-        total_loss += loss.item() * data.size(0)
+        total_loss += loss.item()
 
         if i % args.log_interval == 0 and i > 0:
-            cur_loss = total_loss / args.log_interval
+            #print(loss.item())
+            #cur_loss = total_loss / i
+            cur_loss = loss.item()
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:5.5f} | ms/batch {:5.2f} | '
                     'loss {:5.2f}'.format(
@@ -225,7 +228,7 @@ optimizer = optim.SGD(model.parameters(), lr=lr,momentum = 1-alpha)
 try:
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
-        train()
+        train(loaders['train'])
         #val_loss = evaluate(val_data)
         #print('-' * 89)
         #print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
