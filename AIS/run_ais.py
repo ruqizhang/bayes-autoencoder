@@ -101,7 +101,7 @@ if args.dataset == 'MNIST':
         print('Preparing model')
         print(*model_cfg.args)
         print('using ', args.zdim, ' latent space')
-        model = model_cfg.base(*model_cfg.args, zdim=args.zdim, **model_cfg.kwargs)
+        model = model_cfg.base(*model_cfg.args, zdim=args.zdim, noise_dim = args.zdim, **model_cfg.kwargs)
         
 
 if args.dataset == 'ptb':
