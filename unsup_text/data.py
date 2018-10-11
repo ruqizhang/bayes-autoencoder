@@ -65,12 +65,12 @@ def batchify(data, bsz, use_cuda = True):
 
 
 class TextDataLoader(object):
-    def __init__(self, dataset, by):
-        self.by_amount = by
+    def __init__(self, dataset, bptt):
+        self.bptt = bptt
         self.dataset = dataset
         
     def get_batch(self, i):
-        seq_len = min(self.by_amount, len(self.dataset) - 1 - i)
+        seq_len = min(self.bptt, len(self.dataset) - 1 - i)
 
         data = self.dataset[i:i+seq_len]
         target = self.dataset[i+1:i+1+seq_len].view(-1)
@@ -78,7 +78,10 @@ class TextDataLoader(object):
         return data, target
 
     def __iter__(self):
-        return starmap(self.get_batch, zip(range(0, self.dataset.size(0) - 1, self.by_amount)))
+        return starmap(self.get_batch, zip(range(0, self.dataset.size(0) - 1, self.bptt)))
+
+    def __len__(self):
+        return len(self.dataset) * self.bptt
 
 def loaders(dataset, path, batch_size, bptt, use_cuda = True):
     if dataset != 'ptb':

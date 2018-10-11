@@ -7,6 +7,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 import data
+import models
 from models.bae import BAE
 import torch.optim as optim
 import numpy as np
@@ -83,112 +84,47 @@ model = BAE.base(ntokens, args.emsize, args.nhid, args.zdim,args.nlayers, args.b
 if args.cuda:
     model.cuda()
 
-def repackage_hidden(h):
-    """Wraps hidden states in new Variables, to detach them from their history."""
-    if type(h) == Variable:
-        return Variable(h.data)
-    else:
-        return tuple(repackage_hidden(v) for v in h)
-
-def loss_function(recon_batch, x):
-    recon_batch = recon_batch.view(-1,ntokens)
-    BCE = F.cross_entropy(recon_batch, x)
-    return BCE
-
-def en_loss(z_recon,z):
-    z = Variable(z.data,requires_grad = False)
-    loss = F.mse_loss(z_recon,z)
-    return loss
-
-def z_prior_loss(z):
-    #prior_loss = 0.5*torch.sum(z*z)
-    prior_distribution = torch.distributions.Normal(torch.zeros_like(z), torch.ones_like(z))
-    prior_loss = -prior_distribution.log_prob(z).sum()
-    return prior_loss
-
-def z_noise_loss(z):
-    noise_std = (2 * lr * alpha) ** 0.5
-    rand_like_z = torch.zeros_like(z).normal_() * noise_std
-    noise_loss = torch.sum(z * rand_like_z)
-    #print('noise_loss',noise_loss)#1e-8
-    return noise_loss
-
-def evaluate(data_source):
-    # Turn on evaluation mode which disables dropout.
-    model.eval()
-    total_loss = 0
-    #total_kld = 0
-    #ntokens = len(corpus.dictionary)
-    #count=0
-    # hidden = model.init_hidden(eval_batch_size)
-    #for i in range(0, data_source.size(0) - 1, args.bptt):
-    for i, (data, targets) in enumerate(data_source):
-        #print(i, count)
-        #data, targets = get_batch(data_source, i)
-        model.decoder.bsz = args.batch_size
-        recon_batch,z,_ = model(data)
-        BCE = loss_function(recon_batch, targets)
-
-        loss = BCE
-        total_loss += loss.item()
-        #count+=1
-
-    #print(total_loss, i)
-    avg = total_loss / i
-    print(' ppl_avg :%g avg_loss:%g ' % (math.exp(avg),avg ))
-    return avg
-
-def z_opt(z_sample):
-
-    opt = optim.SGD([z_sample], lr=lr, momentum = 1-alpha)
-
-    return opt
 def train(loader):
     # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0
     start_time = time.time()
-    #ntokens = len(corpus.dictionary)
-    model.decoder.bsz = args.batch_size
-    # hidden = model.init_hidden(args.batch_size)
+
     for batch, (data, targets) in enumerate(loader):
-        #print(data)
-        #print('loader size: ', data.size())
-        #data, targets = get_batch(train_data, batch)
-        #print('get_batch size: ', data.size())
-        # Starting each batch, we detach the hidden state from how it was previously produced.
-        # If we didn't, the model would try backpropagating all the way to start of the dataset.
-        # hidden = repackage_hidden(hidden)
+
         for j in range(J):
             if j == 0:
                 optimizer.zero_grad()
                 recon_batch,z,_ = model(data)
 
                 z_sample = Variable(z.data,requires_grad = True)
-                z_optimizer = z_opt(z_sample)
+                z_optimizer = utils.z_opt(z_sample, lr, alpha)
                 z_optimizer.zero_grad()
             else:
                 optimizer.zero_grad()
                 z_optimizer.zero_grad()
 
-                emb = model.embed(data)
-                recon_batch = model.decoder(emb,z_sample)
+                if type(model)==models.bae.BAE_LSTM:
+                    emb = model.embed(data)
+                    recon_batch = model.decoder(emb,z_sample)
+                else:
+                    recon_batch = model.decoder(z_sample)
 
-            BCE = loss_function(recon_batch, targets)
+            BCE = utils.loss_function(recon_batch, targets, ntokens)
 
             prior_loss = model.prior_loss(prior_std) 
             noise_loss = model.noise_loss(lr,alpha)
-            prior_loss /= args.bptt*len(loader.dataset)
-            noise_loss /= args.bptt*len(loader.dataset)
+            prior_loss /= len(loader)
+            noise_loss /= len(loader)
 
-            prior_loss_z = z_prior_loss(z_sample)
-            noise_loss_z = z_noise_loss(z_sample)
+            prior_loss_z = utils.z_prior_loss(z_sample)
+            noise_loss_z = utils.z_noise_loss(z_sample, lr, alpha)
             prior_loss_z /= z_sample.size(0)
             noise_loss_z /= z_sample.size(0)
 
             loss = BCE + prior_loss + noise_loss + prior_loss_z + noise_loss_z
             if j>burnin:
-                loss_en = en_loss(z_sample,z)
+                loss_en = utils.en_loss(z_sample,z)
                 loss += loss_en
             loss.backward()
 
@@ -228,7 +164,7 @@ try:
 
         #validate
         with torch.no_grad():
-            val_loss = evaluate(loaders['valid'])
+            val_loss = utils.evaluate(loaders['valid'], model, ntokens)
             torch.cuda.synchronize()
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
@@ -237,7 +173,7 @@ try:
             print('-' * 89)
 
             #test
-            test_loss = evaluate(loaders['test'])
+            test_loss = utils.evaluate(loaders['test'], model, ntokens)
             torch.cuda.synchronize()
 
             print('-' * 89)
