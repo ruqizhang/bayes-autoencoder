@@ -1,5 +1,6 @@
 import os
 import torch
+from itertools import starmap
 
 class Dictionary(object):
     def __init__(self):
@@ -49,3 +50,51 @@ class Corpus(object):
                     token += 1
 
         return ids
+
+def batchify(data, bsz, use_cuda = True):
+    # Work out how cleanly we can divide the dataset into bsz parts.
+    nbatch = data.size(0) // bsz
+    # Trim off any extra elements that wouldn't cleanly fit (remainders).
+    data = data.narrow(0, 0, nbatch * bsz)
+    # Evenly divide the data across the bsz batches.
+    data = data.view(bsz, -1).t().contiguous()
+    if use_cuda:
+        data = data.cuda()
+    return data
+
+
+
+class TextDataLoader(object):
+    def __init__(self, dataset, by):
+        self.by_amount = by
+        self.dataset = dataset
+        
+    def get_batch(self, i):
+        seq_len = min(self.by_amount, len(self.dataset) - 1 - i)
+
+        data = self.dataset[i:i+seq_len]
+        target = self.dataset[i+1:i+1+seq_len].view(-1)
+
+        return data, target
+
+    def __iter__(self):
+        return starmap(self.get_batch, zip(range(0, self.dataset.size(0) - 1, self.by_amount)))
+
+def loaders(dataset, path, batch_size, bptt, use_cuda = True):
+    if dataset != 'ptb':
+        print('Only ptb is implemented currently')
+        
+
+    corpus = Corpus(path)
+
+    train_data = batchify(corpus.train, batch_size, use_cuda)
+    val_data = batchify(corpus.valid, batch_size, use_cuda)
+    test_data = batchify(corpus.test, batch_size, use_cuda)
+
+    loaders = {'train': TextDataLoader(train_data, bptt),
+                'valid': TextDataLoader(val_data, bptt),
+                'test': TextDataLoader(test_data, bptt)}
+
+    ntokens = len(corpus.dictionary)
+
+    return loaders, ntokens
