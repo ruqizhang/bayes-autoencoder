@@ -108,11 +108,11 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
                     loss += loss_en
                 if j%2==0:
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
                     optimizer.step()
                 else:
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
                     z_optimizer.step()
             else:
                 if j>burnin:

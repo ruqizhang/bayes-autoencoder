@@ -33,6 +33,10 @@ parser.add_argument('--nlayers', type=int, default=2,
                     help='number of layers')
 parser.add_argument('--lr', type=float, default=1,
                     help='initial learning rate')
+parser.add_argument('--burnin', type=int, default=0,
+                    help='number of burnin steps (default 0)')
+parser.add_argument('--J', type=int, default=2, 
+                    help='number of updates per mini-batch (default for sim. 2, use 4 for gibbs)')
 parser.add_argument('--clip', type=float, default=0.25,
                     help='gradient clipping')
 parser.add_argument('--epochs', type=int, default=100,
@@ -47,8 +51,8 @@ parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
-parser.add_argument('--cuda', action='store_true',
-                    help='use CUDA')
+parser.add_argument('--gibbs', action='store_true',
+                    help='gibbs updating or simulatneous updating')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N',
                     help='report interval')
 parser.add_argument('--save', type=str,  default='model.pt',
@@ -60,6 +64,12 @@ args = parser.parse_args()
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
 args.cuda = True
+
+if not args.gibbs:
+    print('Using simulataneous updating')
+    args.gibbs = False
+else:
+    print('Using Gibbs updating')
 
 ###############################################################################
 # Load data
@@ -83,15 +93,15 @@ if args.cuda:
     model.cuda()
 
 # Loop over epochs.
-lr = args.lr
+#lr = args.lr
 alpha = 0.1
 bit = 0
 prior_std = 1
 epoch_cut = 0
-burnin = 0
-J = 2
+#burnin = 0
+#J = 2
 best_val_loss = 1e10
-optimizer = optim.SGD(model.parameters(), lr=lr,momentum = 1-alpha)
+optimizer = optim.SGD(model.parameters(), lr=args.lr,momentum = 1-alpha)
 # At any point you can hit Ctrl + C to break out of training early.
 try:
     for epoch in range(1, args.epochs+1):
@@ -99,9 +109,9 @@ try:
 
         #train
         utils.train(epoch, loaders['train'], model, optimizer, ntokens, \
-                    lr, alpha, J, burnin, prior_std, args.clip, \
+                    args.lr, alpha, args.J, args.burnin, prior_std, args.clip, \
                     args.log_interval, args.bptt, \
-                    gibbs = False)
+                    gibbs = args.gibbs)
 
         #validate
         with torch.no_grad():
