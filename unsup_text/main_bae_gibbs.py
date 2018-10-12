@@ -115,7 +115,7 @@ def evaluate(data_source):
     model.eval()
     total_loss = 0
     total_kld = 0
-    ntokens = len(corpus.dictionary)
+    #ntokens = len(corpus.dictionary)
     count=0
     # hidden = model.init_hidden(eval_batch_size)
     #for i in range(0, data_source.size(0) - 1, args.bptt):
@@ -158,7 +158,7 @@ def train(data_source):
                 optimizer.zero_grad()
                 recon_batch,z,xi = model(data)
                 z_sample = Variable(z.data,requires_grad = True)
-                z_optimizer = z_opt(z_sample)
+                z_optimizer = utils.z_opt(z_sample)
                 z_optimizer.zero_grad()
             else:
                 optimizer.zero_grad()
@@ -220,13 +220,13 @@ try:
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
         train(loaders['train'])
-        val_loss = evaluate(loaders['valid'])
+        val_loss = utils.evaluate(loaders['valid'], model, ntokens)
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                 'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                            val_loss, math.exp(val_loss)))
         print('-' * 89)
-        test_loss = evaluate(loaders['test'])
+        test_loss = utils.evaluate(loaders['test'], model, ntokens)
         if epoch > 50:
             print('save!')
             torch.save(model.state_dict(),'./bn/model_gibbs_a0.1_ppl_2%i.pt'%(epoch))
