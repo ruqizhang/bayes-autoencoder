@@ -49,15 +49,16 @@ def evaluate(data_source, model, dim):
     model.eval()
     total_loss = 0
     
-    for i, (data, targets) in enumerate(data_source):
+    count = 0
+    for data, targets in data_source:
 
         recon_batch,z,_ = model(data)
         BCE = loss_function(recon_batch, targets, dim)
 
         loss = BCE
         total_loss += loss.item()
-
-    avg = total_loss / i
+        count += 1
+    avg = total_loss / count
     print(' ppl_avg :%g avg_loss:%g ' % (math.exp(avg),avg ))
     return avg
 
