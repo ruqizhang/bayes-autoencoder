@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 import models
+import data as data_utils
 
 def z_opt(z_sample, lr, alpha):
 
@@ -49,7 +50,9 @@ def evaluate(data_source, model, dim):
     model.eval()
     total_loss = 0
     
-    for i, (data, targets) in enumerate(data_source):
+    #for i, (data, targets) in enumerate(data_source):
+    for count, i in enumerate(range(0, data_source.size(0) - 1, 35)):
+        data, targets = data_utils.get_batch(i, data_source, 35)
 
         recon_batch,z,_ = model(data)
         BCE = loss_function(recon_batch, targets, dim)
@@ -57,7 +60,7 @@ def evaluate(data_source, model, dim):
         loss = BCE
         total_loss += loss.item()
 
-    avg = total_loss / i
+    avg = total_loss / count
     print(' ppl_avg :%g avg_loss:%g ' % (math.exp(avg),avg ))
     return avg
 
@@ -66,9 +69,11 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
     model.train()
     total_loss = 0
     start_time = time.time()
-    epoch_start_time = start_time
+    #epoch_start_time = start_time
 
-    for batch, (data, targets) in enumerate(loader):
+    #for batch, (data, targets) in enumerate(loader):
+    for batch, i in enumerate(range(0, loader.size(0) - 1, bptt)):
+        data, targets = data_utils.get_batch(i, loader, bptt)
 
         for j in range(J):
             if j == 0:
@@ -92,8 +97,8 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
 
             prior_loss = model.prior_loss(prior_std) 
             noise_loss = model.noise_loss(lr,alpha)
-            prior_loss /= len(loader)
-            noise_loss /= len(loader)
+            prior_loss /= len(loader)*bptt
+            noise_loss /= len(loader)*bptt
 
             prior_loss_z = z_prior_loss(z_sample)
             noise_loss_z = z_noise_loss(z_sample, lr, alpha)
@@ -131,7 +136,7 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:5.5f} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f} '.format(
-                epoch, batch, len(loader.dataset) // bptt, lr,
+                epoch, batch, len(loader) // bptt, lr,
                 elapsed * 1000 / log_interval, cur_loss, math.exp(cur_loss)))
             total_loss = 0
             start_time = time.time()

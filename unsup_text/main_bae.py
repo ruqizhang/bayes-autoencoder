@@ -58,7 +58,7 @@ parser.add_argument('--log-interval', type=int, default=200, metavar='N',
 parser.add_argument('--save', type=str,  default='model.pt',
                     help='path to save the final model')
 parser.add_argument('--save_epochs', type = int, help = 'how often to save the model')
-parser.add_argument('--dir', type = str, default = 'directory to save model to')
+parser.add_argument('--dir', type = str, default = './bn/', help = 'directory to save model to')
 
 args = parser.parse_args()
 # Set the random seed manually for reproducibility.
@@ -74,7 +74,14 @@ else:
 ###############################################################################
 # Load data
 ###############################################################################
-loaders, ntokens = data.loaders(args.dataset, args.data_path, args.batch_size, args.bptt, args.cuda)
+#loaders, ntokens = data.loaders(args.dataset, args.data_path, args.batch_size, args.bptt, args.cuda)
+corpus = data.Corpus(args.data_path)
+ntokens = len(corpus.dictionary)
+
+train_data = data.batchify(corpus.train, args.batch_size)
+val_data = data.batchify(corpus.valid, args.batch_size)
+test_data = data.batchify(corpus.test, args.batch_size)
+loaders = {'train':train_data, 'valid':val_data, 'test':test_data}
 
 #make directory
 print('Preparing directory %s' % args.dir)

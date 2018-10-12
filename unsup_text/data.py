@@ -62,7 +62,13 @@ def batchify(data, bsz, use_cuda = True):
         data = data.cuda()
     return data
 
+def get_batch(i, dataset, bptt):
+    seq_len = min(bptt, len(dataset) - 1 - i)
 
+    data = dataset[i:i+seq_len]
+    target = dataset[i+1:i+1+seq_len].view(-1)
+
+    return data, target
 
 class TextDataLoader(object):
     def __init__(self, dataset, bptt):
