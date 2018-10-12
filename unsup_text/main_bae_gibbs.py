@@ -158,7 +158,7 @@ def train(data_source):
                 optimizer.zero_grad()
                 recon_batch,z,xi = model(data)
                 z_sample = Variable(z.data,requires_grad = True)
-                z_optimizer = utils.z_opt(z_sample)
+                z_optimizer = utils.z_opt(z_sample, lr, alpha)
                 z_optimizer.zero_grad()
             else:
                 optimizer.zero_grad()
