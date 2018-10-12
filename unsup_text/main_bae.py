@@ -55,8 +55,9 @@ args.cuda = True
 ###############################################################################
 # Load data
 ###############################################################################
-
-corpus = data.Corpus(args.data)
+loaders, ntokens = data.loaders('ptb', args.data, args.batch_size, args.bptt, args.cuda)
+eval_batch_size = args.batch_size
+"""corpus = data.Corpus(args.data)
 
 def batchify(data, bsz):
     # Work out how cleanly we can divide the dataset into bsz parts.
@@ -72,13 +73,13 @@ def batchify(data, bsz):
 eval_batch_size = args.batch_size
 train_data = batchify(corpus.train, args.batch_size)
 val_data = batchify(corpus.valid, eval_batch_size)
-test_data = batchify(corpus.test, eval_batch_size)
+test_data = batchify(corpus.test, eval_batch_size)"""
 
 ###############################################################################
 # Build the model
 ###############################################################################
 
-ntokens = len(corpus.dictionary)
+#ntokens = len(corpus.dictionary)
 model = BAE.base(ntokens, args.emsize, args.nhid, args.zdim,args.nlayers, args.batch_size, args.dropout, args.tied)
 if args.cuda:
     model.cuda()
@@ -124,11 +125,12 @@ def evaluate(data_source):
     model.eval()
     total_loss = 0
     total_kld = 0
-    ntokens = len(corpus.dictionary)
+    #ntokens = len(corpus.dictionary)
     count=0
     # hidden = model.init_hidden(eval_batch_size)
-    for i in range(0, data_source.size(0) - 1, args.bptt):
-        data, targets = get_batch(data_source, i)
+    #for i in range(0, data_source.dataset.size(0) - 1, args.bptt):
+    #    data, targets = data_source.get_batch(i)
+    for data, targets in data_source:
         model.decoder.bsz = eval_batch_size
         recon_batch,z,xi = model(data)
         BCE = loss_function(recon_batch, targets)
@@ -145,16 +147,17 @@ def z_opt(z_sample):
     opt = optim.SGD([z_sample], lr=lr, momentum = 1-alpha)
 
     return opt
-def train():
+def train(data_source):
     # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0
     start_time = time.time()
-    ntokens = len(corpus.dictionary)
+    #ntokens = len(corpus.dictionary)
     model.decoder.bsz = args.batch_size
     # hidden = model.init_hidden(args.batch_size)
-    for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
-        data, targets = get_batch(train_data, i)
+    #for batch, i in enumerate(range(0, data_source.dataset.size(0) - 1, args.bptt)):
+    #    data, targets = data_source.get_batch(i)
+    for batch, (data, targets) in enumerate(data_source):
 
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
@@ -179,8 +182,8 @@ def train():
 
             prior_loss = model.prior_loss(prior_std) 
             noise_loss = model.noise_loss(lr,alpha)
-            prior_loss /=args.bptt*len(train_data)
-            noise_loss /=args.bptt*len(train_data)
+            prior_loss /=args.bptt*len(data_source)
+            noise_loss /=args.bptt*len(data_source)
             prior_loss_z = z_prior_loss(z_sample)
             noise_loss_z = z_noise_loss(z_sample)
             prior_loss_z /= z_sample.size(0)
@@ -202,7 +205,7 @@ def train():
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:5.5f} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f} '.format(
-                epoch, batch, len(train_data) // args.bptt, lr,
+                epoch, batch, len(data_source) // args.bptt, lr,
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
             total_loss = 0
             start_time = time.time()
@@ -221,14 +224,14 @@ optimizer = optim.SGD(model.parameters(), lr=lr,momentum = 1-alpha)
 try:
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
-        train()
-        val_loss = evaluate(val_data)
+        train(loaders['train'])
+        val_loss = evaluate(loaders['valid'])
         print('-' * 89)
         print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                 'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                            val_loss, math.exp(val_loss)))
         print('-' * 89)
-        test_loss = evaluate(test_data)
+        test_loss = evaluate(loaders['test'])
         if epoch > 50:
             print('save!')
             torch.save(model.state_dict(),'./bn/model_a0.1_ppl_2%i.pt'%(epoch))
