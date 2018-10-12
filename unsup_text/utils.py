@@ -121,9 +121,9 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
                     loss += loss_en
                 loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
-            optimizer.step()
-            z_optimizer.step()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+                optimizer.step()
+                z_optimizer.step()
 
         total_loss += BCE.data
 
