@@ -64,6 +64,8 @@ def evaluate(data_source, model, dim, epoch, dir):
         
         if count == 0 and type(model)==models.bae_mlp.baeMLP:
             model.reconstruct_samples(data, epoch = epoch, dir = dir)
+            model.generate_samples(epoch = epoch, dir = dir)
+            
         count += 1
 
     avg = total_loss / count
