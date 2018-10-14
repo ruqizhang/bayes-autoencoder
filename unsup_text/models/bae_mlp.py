@@ -5,6 +5,7 @@ from torchvision import transforms
 from torchvision.utils import save_image
 from .mlp import *
 
+import PIL
 __all__ = ['BAE_MLP']
 
 class baeMLP(nn.Module):
@@ -63,11 +64,25 @@ class baeMLP(nn.Module):
         save_image(sample.data.view(64, 1, 28, 28),
             dir + '/results/sample_' + str(epoch) + '.png')  
 
+    def criterion(self, recon, data, target):
+        BCE = torch.nn.functional.binary_cross_entropy(recon, data.view_as(recon), reduction='sum')
+        return BCE
+
+
 class BAE_MLP:
     args = list()
     kwargs = {'activation': nn.ReLU}
 
     base = baeMLP
 
+    #transform_train = lambda x: transforms.ToTensor()(x).bernoulli() if type(x)==PIL.Image.Image else x.bernoulli()
     transform_train = lambda x: transforms.ToTensor()(x).bernoulli()
+    
+    """def transform_train(x):
+        print('before: ', type(x))
+        if type(x)==torch.Tensor:
+            x = transforms.ToPILImage()(x.numpy())
+
+        print('after: ', type(x))
+        return transforms.ToTensor()(x).bernoulli()"""
     transform_test = transform_train

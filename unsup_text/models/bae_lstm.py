@@ -89,6 +89,7 @@ class baeLSTM(nn.Module):
 
     def __init__(self, ntoken, ninp, nhidden, zdim, noise_dim, nlayers, bsz=64,dropout=0.5, tie_weights=False):
         super(baeLSTM, self).__init__()
+        self.ntoken = ntoken
         self.zdim = zdim
 
         self.drop = nn.Dropout(dropout)
@@ -145,6 +146,11 @@ class baeLSTM(nn.Module):
         decoder_output = self.decoder.fc4(decoder_output[-1])
 
         return decoder_output, decoder_hidden
+
+    def criterion(self, recon, data, target):
+        recon = recon.view(-1, self.ntoken)
+
+        return torch.nn.functional.cross_entropy(recon, target)
 
 class BAE_LSTM:
     args = list()

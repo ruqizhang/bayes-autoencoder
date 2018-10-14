@@ -117,21 +117,16 @@ def construct_image_loaders(dataset, path, batch_size, bptt, transform_train, tr
     if use_validation:
         print("Using train (" + str(len(train_set.train_data)-val_size) + ") + validation (" +str(val_size)+ ")")
         train_set.train_data = train_set.train_data[:-val_size]
-        #train_set.train_labels = train_set.train_labels[:-val_size]
-        train_set.train_labels = train_set.train_data.clone().float()
-
+        
         test_set = ds(root=path, train=True, download=True, transform=transform_test)
         test_set.train = False
         test_set.test_data = test_set.train_data[-val_size:]
-        test_set.test_labels = test_set.train_data[-val_size:].clone().float()
-        #test_set.test_labels = test_set.train_labels[-val_size:]
+        test_set.test_labels = test_set.train_labels[-val_size:]
         delattr(test_set, 'train_data')
         delattr(test_set, 'train_labels')
     else:
         print('You are going to run models on the test set. Are you sure?')
         test_set = ds(root=path, train=False, download=True, transform=transform_test)
-
-        test_set.test_labels = test_set.test_data.clone().float()
 
     train_loader = ImageDataLoader(
         dataset=train_set,

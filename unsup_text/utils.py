@@ -25,18 +25,8 @@ def save_model(epoch, model, optimizer, dir):
 def loss_function(recon_batch, x, dim):
     #recon_batch = recon_batch.view(-1,dim)
 
-    # This is possibly buggy
-    if len(x.shape) > 1:
-        #BCE = F.cross_entropy(recon_batch, x.view_as(recon_batch))
-        #
-        #print(recon_batch[0,0:10], x.view_as(recon_batch)[0,0:10])
-        #l_dist =  torch.distributions.Bernoulli(probs = recon_batch)
-        #BCE = -l_dist.log_prob(x.view_as(recon_batch)).sum(dim=1)
-        #BCE = BCE.mean()
-        BCE = torch.nn.functional.binary_cross_entropy(recon_batch, x.view(-1, 784), reduction='sum')
-    else:
-        #print('here')
-        BCE = F.cross_entropy(recon_batch, x)
+    #print(recon_batch.dtype, x.dtype, recon_batch.size(), x.size())
+    BCE = F.binary_cross_entropy(recon_batch, x, reduction='sum')
     return BCE
 
 def en_loss(z_recon,z):
@@ -66,7 +56,8 @@ def evaluate(data_source, model, dim, epoch, dir):
         data, targets = data.cuda(), targets.cuda()
 
         recon_batch,z,_ = model(data)
-        BCE = loss_function(recon_batch, targets, dim)
+
+        BCE = model.criterion(recon_batch, data, targets)
 
         loss = BCE
         total_loss += loss.item()
@@ -107,7 +98,12 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
                 else:
                     recon_batch = model.decoder(z_sample)
 
-            BCE = loss_function(recon_batch, targets, dim)
+            BCE = model.criterion(recon_batch, data, targets)
+            #if type(model)==models.bae_lstm.baeLSTM:
+            #    BCE = loss_function(recon_batch.view(-1, dim), targets, dim)
+            #else:
+            #    BCE = loss_function(recon_batch, data.view_as(recon_batch), dim)
+            #BCE = loss_function(recon_batch, data.view(-1,784), dim)
 
             prior_loss = model.prior_loss(prior_std) 
             noise_loss = model.noise_loss(lr,alpha)
