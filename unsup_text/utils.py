@@ -23,8 +23,20 @@ def save_model(epoch, model, optimizer, dir):
         f = dir + '/ckpt_' + str(epoch+1) +'.pth.tar')
 
 def loss_function(recon_batch, x, dim):
-    recon_batch = recon_batch.view(-1,dim)
-    BCE = F.cross_entropy(recon_batch, x)
+    #recon_batch = recon_batch.view(-1,dim)
+
+    # This is possibly buggy
+    if len(x.shape) > 1:
+        #BCE = F.cross_entropy(recon_batch, x.view_as(recon_batch))
+        #
+        #print(recon_batch[0,0:10], x.view_as(recon_batch)[0,0:10])
+        #l_dist =  torch.distributions.Bernoulli(probs = recon_batch)
+        #BCE = -l_dist.log_prob(x.view_as(recon_batch)).sum(dim=1)
+        #BCE = BCE.mean()
+        BCE = torch.nn.functional.binary_cross_entropy(recon_batch, x.view(-1, 784), reduction='sum')
+    else:
+        #print('here')
+        BCE = F.cross_entropy(recon_batch, x)
     return BCE
 
 def en_loss(z_recon,z):
@@ -44,22 +56,27 @@ def z_noise_loss(z, lr, alpha):
     noise_loss = torch.sum(z * rand_like_z)
     return noise_loss
 
-def evaluate(data_source, model, dim):
+def evaluate(data_source, model, dim, epoch, dir):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0
     
     count = 0
     for data, targets in data_source:
+        data, targets = data.cuda(), targets.cuda()
 
         recon_batch,z,_ = model(data)
         BCE = loss_function(recon_batch, targets, dim)
 
         loss = BCE
         total_loss += loss.item()
+        
+        if count == 0 and type(model)==models.bae_mlp.baeMLP:
+            model.reconstruct_samples(data, epoch = epoch, dir = dir)
         count += 1
+
     avg = total_loss / count
-    print(' ppl_avg :%g avg_loss:%g ' % (math.exp(avg),avg ))
+    #print(' ppl_avg :%g avg_loss:%g ' % (math.exp(avg),avg ))
     return avg
 
 def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std, clip, log_interval, bptt, gibbs = False):
@@ -70,7 +87,8 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
     epoch_start_time = start_time
 
     for batch, (data, targets) in enumerate(loader):
-
+        data, targets = data.cuda(), targets.cuda()
+        
         for j in range(J):
             if j == 0:
                 optimizer.zero_grad()
@@ -83,7 +101,7 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
                 optimizer.zero_grad()
                 z_optimizer.zero_grad()
 
-                if type(model)==models.bae.BAE_LSTM:
+                if type(model)==models.bae_lstm.baeLSTM:
                     emb = model.embed(data)
                     recon_batch = model.decoder(emb,z_sample)
                 else:
@@ -130,10 +148,15 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
         if batch % log_interval == 0 and batch > 0:
             cur_loss = total_loss.item() / log_interval
             elapsed = time.time() - start_time
+            try:
+                curr_ppl = math.exp(cur_loss)
+            except:
+                curr_ppl = 1e10
+
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:5.5f} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f} '.format(
                 epoch, batch, len(loader.dataset) // bptt, lr,
-                elapsed * 1000 / log_interval, cur_loss, math.exp(cur_loss)))
+                elapsed * 1000 / log_interval, cur_loss, curr_ppl))
             total_loss = 0
             start_time = time.time()
 

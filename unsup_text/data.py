@@ -1,6 +1,7 @@
 import os
 import torch
 from itertools import starmap
+import torchvision
 
 class Dictionary(object):
     def __init__(self):
@@ -62,8 +63,6 @@ def batchify(data, bsz, use_cuda = True):
         data = data.cuda()
     return data
 
-
-
 class TextDataLoader(object):
     def __init__(self, dataset, bptt):
         self.bptt = bptt
@@ -83,16 +82,16 @@ class TextDataLoader(object):
     def __len__(self):
         return len(self.dataset) * self.bptt
 
-def loaders(dataset, path, batch_size, bptt, use_cuda = True):
-    if dataset != 'ptb':
-        print('Only ptb is implemented currently')
-        
-
+def construct_text_loaders(dataset, path, batch_size, bptt, transform_train, transform_test,
+                            use_validation=True, use_cuda = True):
     corpus = Corpus(path)
 
     train_data = batchify(corpus.train, batch_size, use_cuda)
     val_data = batchify(corpus.valid, batch_size, use_cuda)
     test_data = batchify(corpus.test, batch_size, use_cuda)
+
+    if not use_validation:
+        print('Warning, ptb has default validation set so it will still be returned.')
 
     loaders = {'train': TextDataLoader(train_data, bptt),
                 'valid': TextDataLoader(val_data, bptt),
@@ -101,3 +100,65 @@ def loaders(dataset, path, batch_size, bptt, use_cuda = True):
     ntokens = len(corpus.dictionary)
 
     return loaders, ntokens
+
+class ImageDataLoader(torch.utils.data.DataLoader):
+    def __init__(self,**kwargs):
+        super(ImageDataLoader,self).__init__(**kwargs)
+    def __len__(self):
+        return len(self.dataset)
+
+def construct_image_loaders(dataset, path, batch_size, bptt, transform_train, transform_test, 
+                            use_validation=True, use_cuda = True, num_workers=4, val_size=5000):
+    ds = getattr(torchvision.datasets, dataset)
+            
+    path = os.path.join(path, dataset.lower())
+    train_set = ds(root=path, train=True, download=True, transform=transform_train)
+
+    if use_validation:
+        print("Using train (" + str(len(train_set.train_data)-val_size) + ") + validation (" +str(val_size)+ ")")
+        train_set.train_data = train_set.train_data[:-val_size]
+        #train_set.train_labels = train_set.train_labels[:-val_size]
+        train_set.train_labels = train_set.train_data.clone().float()
+
+        test_set = ds(root=path, train=True, download=True, transform=transform_test)
+        test_set.train = False
+        test_set.test_data = test_set.train_data[-val_size:]
+        test_set.test_labels = test_set.train_data[-val_size:].clone().float()
+        #test_set.test_labels = test_set.train_labels[-val_size:]
+        delattr(test_set, 'train_data')
+        delattr(test_set, 'train_labels')
+    else:
+        print('You are going to run models on the test set. Are you sure?')
+        test_set = ds(root=path, train=False, download=True, transform=transform_test)
+
+        test_set.test_labels = test_set.test_data.clone().float()
+
+    train_loader = ImageDataLoader(
+        dataset=train_set,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True
+    )
+
+    test_loader = ImageDataLoader(
+                    dataset=test_set,
+                    batch_size=batch_size,
+                    shuffle=False,
+                    num_workers=num_workers,
+                    pin_memory=True
+                )
+
+    #def test_loader.__len__(self):
+    #    return len(self.dataset)
+
+    loaders_dict = {'train':train_loader, 'test': test_loader}
+    
+    return loaders_dict, len(train_set.train_data)
+
+    
+def loaders(dataset, path, batch_size, bptt, transform_train, transform_test, use_validation, use_cuda = True):
+    if dataset == 'ptb':        
+        return construct_text_loaders(dataset, path, batch_size, bptt, transform_train, transform_test, use_validation, use_cuda = True)
+    if dataset == 'MNIST':
+        return construct_image_loaders(dataset, path, batch_size, bptt, transform_train, transform_test, use_validation, use_cuda = True)

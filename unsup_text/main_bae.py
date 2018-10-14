@@ -8,7 +8,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import data
 import models
-from models.bae import BAE
+#from models.bae import BAE
 import torch.optim as optim
 import numpy as np
 from itertools import starmap, cycle
@@ -57,9 +57,10 @@ parser.add_argument('--log-interval', type=int, default=200, metavar='N',
                     help='report interval')
 parser.add_argument('--save', type=str,  default='model.pt',
                     help='path to save the final model')
-parser.add_argument('--save_epochs', type = int, help = 'how often to save the model')
+parser.add_argument('--save_epochs', type = int, default = 10, help = 'how often to save the model')
 parser.add_argument('--dir', type = str, default = 'directory to save model to')
-
+parser.add_argument('--use_test', action='store_true', 
+                    help='use test dataset instead of validation (default: False)')
 args = parser.parse_args()
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
@@ -71,11 +72,6 @@ if not args.gibbs:
 else:
     print('Using Gibbs updating')
 
-###############################################################################
-# Load data
-###############################################################################
-loaders, ntokens = data.loaders(args.dataset, args.data_path, args.batch_size, args.bptt, args.cuda)
-
 #make directory
 print('Preparing directory %s' % args.dir)
 os.makedirs(args.dir, exist_ok=True)
@@ -84,13 +80,39 @@ with open(os.path.join(args.dir, 'command.sh'), 'w') as f:
     f.write('python' + ' '.join(sys.argv))
     f.write('\n')
 
+
+###############################################################################
+#define the model
+###############################################################################
+print('Using model %s' % args.model)
+model_cfg = getattr(models, args.model)
+
+###############################################################################
+# Load data
+###############################################################################
+loaders, ntokens = data.loaders(args.dataset, args.data_path, args.batch_size, args.bptt, 
+                        model_cfg.transform_train, model_cfg.transform_test,
+                        use_validation=not args.use_test, use_cuda=args.cuda)
+
 ###############################################################################
 # Build the model
 ###############################################################################
+print('Preparing model')
+print(*model_cfg.args)
+print('using ', args.zdim, ' latent space')
+model = model_cfg.base(*model_cfg.args, 
+                    noise_dim=args.zdim, zdim=args.zdim, 
+                    ntoken=ntokens, ninp=args.emsize, nhidden=args.nhid, 
+                    nlayers=args.nlayers, bsz=args.batch_size, 
+                    dropout=args.dropout, tie_weights=args.tied,
+                    **model_cfg.kwargs)
+model.cuda()
 
-model = BAE.base(ntokens, args.emsize, args.nhid, args.zdim,args.nlayers, args.batch_size, args.dropout, args.tied)
-if args.cuda:
-    model.cuda()
+#model = BAE.base(ntokens, args.emsize, args.nhid, args.zdim,args.nlayers, args.batch_size, args.dropout, args.tied)
+#if args.cuda:
+#    model.cuda()
+
+
 
 # Loop over epochs.
 #lr = args.lr
@@ -115,26 +137,34 @@ try:
 
         #validate
         with torch.no_grad():
-            val_loss = utils.evaluate(loaders['valid'], model, ntokens)
+            if 'valid' in loaders:
+                val_loss = utils.evaluate(loaders['valid'], model, ntokens, epoch, args.dir)
 
-            print('-' * 89)
-            print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
-                    'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
-                                            val_loss, math.exp(val_loss)))
-            print('-' * 89)
+                print('-' * 89)
+                print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
+                        'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
+                                                val_loss, math.exp(val_loss)))
+                print('-' * 89)
 
-            #test
-            test_loss = utils.evaluate(loaders['test'], model, ntokens)
+                # Save the model if the validation loss is the best we've seen so far.
+                if not best_val_loss or val_loss < best_val_loss:
+                    print('New Best!')
+                    best_val_loss = val_loss
 
-            print('-' * 89)
-            print('| end of epoch {:3d} | time: {:5.2f}s | test loss {:5.2f} | '
-                    'test ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
-                                            test_loss, math.exp(test_loss)))
-            print('-' * 89)
-            # Save the model if the validation loss is the best we've seen so far.
-            if not best_val_loss or val_loss < best_val_loss:
-                print('New Best!')
-                best_val_loss = val_loss
+            if 'test' in loaders:
+                #test
+                test_loss = utils.evaluate(loaders['test'], model, ntokens, epoch, args.dir)
+
+                print('-' * 89)
+                try:
+                    test_ppl = math.exp(test_loss)
+                except:
+                    test_ppl = 1e10
+                print('| end of epoch {:3d} | time: {:5.2f}s | test loss {:5.2f} | '
+                        'test ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
+                                                test_loss, test_ppl))
+                print('-' * 89)
+
 
             if epoch % args.save_epochs is 0:
                 print('saving model')
