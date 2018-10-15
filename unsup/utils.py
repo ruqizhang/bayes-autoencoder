@@ -57,16 +57,17 @@ def evaluate(data_source, model, dim, epoch, dir):
 
         #draw 100 samples from p(z|x, theta)
         for _ in range(100):
-            recon_batch,_,_ = model(data)
+            with torch.no_grad():
+                recon_batch,_,_ = model(data)
 
-            BCE = model.criterion(recon_batch, data, targets)
+                BCE = model.criterion(recon_batch, data, targets)
 
-            loss = BCE
-            total_loss += loss.item()
-            
-            if count == 0 and type(model)==models.bae_mlp.baeMLP:
-                model.reconstruct_samples(data, epoch = epoch, dir = dir)
-                model.generate_samples(epoch = epoch, dir = dir)
+                loss = BCE
+                total_loss += loss.item()
+                
+                if count == 0 and type(model)==models.bae_mlp.baeMLP:
+                    model.reconstruct_samples(data, epoch = epoch, dir = dir)
+                    model.generate_samples(epoch = epoch, dir = dir)
 
             count += 1
 
