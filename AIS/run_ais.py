@@ -18,8 +18,8 @@ from utils import sigmoidal_schedule
 
 import sys
 sys.path.append('..')
-import unsup_text.models as text_models
-import unsup_images.models as image_models
+import unsup.models as models
+
 #sys.path.append('/nfs01/wm326/bvae/')
 #import vae_images.mnist_unsup.models as image_models
 
@@ -96,7 +96,7 @@ if args.dataset == 'MNIST':
         model = BAE(x_dim=784,z_dim=args.zdim,hidden_dim=400)
     else:
         print('Using model %s' % args.model)
-        model_cfg = getattr(image_models, args.model)
+        model_cfg = getattr(models, args.model)
 
         print('Preparing model')
         print(*model_cfg.args)
@@ -123,7 +123,7 @@ if args.dataset == 'ptb':
     loader = batchify(corpus.test, 64) 
     
     print('Using model %s' % args.model)
-    model_cfg = getattr(text_models, args.model)
+    model_cfg = getattr(models, args.model)
 
     model = model_cfg.base(*model_cfg.args, zdim = args.zdim, ntoken = len(corpus.dictionary),
                             ninp = 200, nhid = 200, nlayers = 2, device_id = 0, bsz = 64)
