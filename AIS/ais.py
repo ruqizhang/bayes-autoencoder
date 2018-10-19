@@ -40,9 +40,9 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         #print('emb size: ', emb.size())
         #print('latent size: ', z.size())
         log_prior = log_normal(z, torch.zeros_like(z), torch.zeros_like(z))
-        print(emb.size(), z.size())
-        print(model.decoder(emb,z).size())
-        log_likelihood = log_likelihood_fn(model.decoder(emb, z), data).sum(dim=0)
+        #print(emb.size(), z.size())
+        #print(model.decoder(emb,z).size())
+        log_likelihood = log_likelihood_fn(model.decoder(emb, z), data)
         #print(log_likelihood.size(), log_prior.size())
 
 
@@ -91,7 +91,7 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         current_z.requires_grad = True
 
         for j, (t0, t1) in tqdm(enumerate(zip(schedule[:-1], schedule[1:]), 1)):
-            print('..')
+            #print('..')
             emb = model.embed(batch)
 
             # update log importance weight
