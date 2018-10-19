@@ -82,7 +82,7 @@ class TextDataLoader(object):
     def __len__(self):
         return len(self.dataset) * self.bptt
 
-def construct_text_loaders(dataset, path, batch_size, bptt=35, transform_train=None, transform_test=None,
+def construct_text_loaders(dataset, path, batch_size, bptt, transform_train, transform_test,
                             use_validation=True, use_cuda = True):
     corpus = Corpus(path)
 

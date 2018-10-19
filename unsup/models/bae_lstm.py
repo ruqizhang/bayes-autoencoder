@@ -115,8 +115,6 @@ class baeLSTM(nn.Module):
         #self.zdim = zdim
         self.word_embeddings.weight.data.uniform_(-initrange, initrange)
 
-    def decode(self, z, emb):
-        return self.decoder(emb, z)
     def forward(self, input):
         emb = self.embed(input)
         z,xi = self.encoder(emb)
