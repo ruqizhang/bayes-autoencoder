@@ -3,9 +3,11 @@ import numpy as np
 def load_vals(name):
     model_list = []
     for i in range(16):
-        f = np.load('text_results/'+name+'_'+str(i)+'.npz')
+        f = np.load('old_text_results/'+name+'_'+str(i)+'.npz')
+        print(len(f['logws']))
         model_list.append(np.mean(f['logws']))
     
+    print(model_list)
     return np.mean(model_list)
 
 vocab_length = 10000.

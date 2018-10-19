@@ -18,8 +18,10 @@ from utils import sigmoidal_schedule
 
 import sys
 sys.path.append('..')
-import unsup_text.models as text_models
-import unsup_images.models as image_models
+import unsup.models as models
+import unsup.data as data_utils
+
+#import unsup_images.models as image_models
 #sys.path.append('/nfs01/wm326/bvae/')
 #import vae_images.mnist_unsup.models as image_models
 
@@ -42,9 +44,9 @@ parser.add_argument('--seed', type=int, default = 1, help='random seed')
 parser.add_argument('--device', type=int, default=None)
 
 args = parser.parse_args()
-if args.device is not None:
-    import os
-    os.system('export CUDA_VISIBLE_DEVICES='+str(args.device))
+#if args.device is not None:
+#    import os
+#    os.system('export CUDA_VISIBLE_DEVICES='+str(args.device))
 
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
@@ -112,7 +114,7 @@ def construct_model_and_dataset(dataset=args.dataset, data_path=args.data_path):
             model = model_cfg.base(*model_cfg.args, zdim=args.zdim, **model_cfg.kwargs)
         
     if dataset == 'ptb':
-        import unsup_text.data as text_data
+        """import unsup_text.data as text_data
         corpus = text_data.Corpus(data_path)
 
         def batchify(data, bsz):
@@ -134,13 +136,16 @@ def construct_model_and_dataset(dataset=args.dataset, data_path=args.data_path):
             target = Variable(source[i+1:i+1+seq_len].view(-1))
             return data, target
 
-        loader = itertools.starmap(get_batch, zip(range(0, loader_batches.size(0) - 1, 35)))
+        loader = itertools.starmap(get_batch, zip(range(0, loader_batches.size(0) - 1, 35)))"""
+        corpus = data_utils.Corpus(data_path)
+        loader_batches = data_utils.batchify(corpus.test, 64)[0:35, :]
+        loader = data_utils.TextDataLoader(loader_batches, 35)
 
         print('Using model %s' % args.model)
-        model_cfg = getattr(text_models, args.model)
+        model_cfg = getattr(models, args.model)
 
-        model = model_cfg.base(*model_cfg.args, zdim = args.zdim, ntoken = len(corpus.dictionary),
-                                ninp = 200, nhid = 200, nlayers = 2, device_id = 0, bsz = 64)
+        model = model_cfg.base(*model_cfg.args, zdim = args.zdim, noise_dim = args.zdim, ntoken = len(corpus.dictionary),
+                                ninp = 200, nhidden = 200, nlayers = 2, bsz = 64)
         
     return model, loader
 
