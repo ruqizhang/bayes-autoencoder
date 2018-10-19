@@ -40,8 +40,11 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         #print('emb size: ', emb.size())
         #print('latent size: ', z.size())
         log_prior = log_normal(z, torch.zeros_like(z), torch.zeros_like(z))
+        print(emb.size(), z.size())
+        print(model.decoder(emb,z).size())
         log_likelihood = log_likelihood_fn(model.decoder(emb, z), data).sum(dim=0)
         #print(log_likelihood.size(), log_prior.size())
+
 
         return log_prior + log_likelihood.mul_(t)
 

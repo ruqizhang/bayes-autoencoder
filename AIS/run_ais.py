@@ -18,8 +18,9 @@ from utils import sigmoidal_schedule
 
 import sys
 sys.path.append('..')
-import unsup_text.models as text_models
-import unsup_images.models as image_models
+import unsup.models as models
+import unsup.data as data
+
 #sys.path.append('/nfs01/wm326/bvae/')
 #import vae_images.mnist_unsup.models as image_models
 
@@ -35,6 +36,7 @@ parser.add_argument('--dataset', type=str, default='MNIST')
 parser.add_argument('--model', type=str, default='BAE', help = 'class of model to load')
 parser.add_argument('--zdim', type=int, default = 20, metavar = 'S',
                     help='latent + noise dimension to use in model')
+parser.add_argument('--nhid', type=int, default = 200, help = 'number of hidden units in model')
 parser.add_argument('--num-steps', type=int, default = 500, help = 'number of steps to run AIS for')
 parser.add_argument('--num-samples', type=int, default = 16, help='number of chains to run AIS over')
 parser.add_argument('--data_path', type=str, default='/scratch/datasets/', help='location of mnist dataset')
@@ -99,53 +101,32 @@ def construct_model_and_dataset(dataset=args.dataset, data_path=args.data_path):
 
         loader = myiterator()
 
-        if args.model=='BAEv2':
-            from bae import BAE
-            model = BAE(x_dim=784,z_dim=args.zdim,hidden_dim=400)
-        else:
-            print('Using model %s' % args.model)
-            model_cfg = getattr(image_models, args.model)
+        print('Using model %s' % args.model)
+        model_cfg = getattr(models, args.model)
 
-            print('Preparing model')
-            print(*model_cfg.args)
-            print('using ', args.zdim, ' latent space')
-            model = model_cfg.base(*model_cfg.args, zdim=args.zdim, **model_cfg.kwargs)
+        print('Preparing model')
+        print(*model_cfg.args)
+        print('using ', args.zdim, ' latent space')
+        model = model_cfg.base(*model_cfg.args, zdim=args.zdim, **model_cfg.kwargs)
         
     if dataset == 'ptb':
-        import unsup_text.data as text_data
-        corpus = text_data.Corpus(data_path)
+        import unsup.data as data
 
-        def batchify(data, bsz):
-            # Work out how cleanly we can divide the dataset into bsz parts.
-            nbatch = data.size(0) // bsz
-            # Trim off any extra elements that wouldn't cleanly fit (remainders).
-            data = data.narrow(0, 0, nbatch * bsz)
-            # Evenly divide the data across the bsz batches.
-            data = data.view(bsz, -1).t().contiguous()
-            #if args.cuda:
-            data = data.cuda(async=True)
-            return data
-
-        loader_batches = batchify(corpus.test, 64)[0:35, :]
-
-        def get_batch(i, source=loader_batches, evaluation=False):
-            seq_len = min(35, len(source) - 1 - i)
-            data = Variable(source[i:i+seq_len], volatile=evaluation)
-            target = Variable(source[i+1:i+1+seq_len].view(-1))
-            return data, target
-
-        loader = itertools.starmap(get_batch, zip(range(0, loader_batches.size(0) - 1, 35)))
+        loaders, ntokens = data.construct_text_loaders(args.dataset, args.data_path, 64)
+        loader = loaders['test']
 
         print('Using model %s' % args.model)
-        model_cfg = getattr(text_models, args.model)
+        model_cfg = getattr(models, args.model)
 
-        model = model_cfg.base(*model_cfg.args, zdim = args.zdim, ntoken = len(corpus.dictionary),
-                                ninp = 200, nhid = 200, nlayers = 2, device_id = 0, bsz = 64)
+        model = model_cfg.base(*model_cfg.args, noise_dim = args.zdim, zdim = args.zdim, ntoken = ntokens,
+                                ninp = 200, nhidden = args.nhid, nlayers = 2, bsz = 64)
+
         
     return model, loader
 
 def main(f=args.file, dataset = args.dataset, data_path=args.data_path, num_samples=args.num_samples, num_steps=args.num_steps):
     model, loader = construct_model_and_dataset(dataset, data_path=data_path)
+
 
     #model.to(args.device)
     model.cuda()
