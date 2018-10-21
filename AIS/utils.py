@@ -52,7 +52,7 @@ def log_normal_full_cov(x, mean, L):
     return term1 + term2
 
 
-def log_bernoulli(probs, target):
+def log_bernoulli(logit, target):
     """
     Args:
         logit:  [B, X]
@@ -61,9 +61,10 @@ def log_bernoulli(probs, target):
     Returns:
         output:      [B]
     """
-    logit = probs_to_logits(probs, is_binary=True)
+    #print(logit[:,:,0])
+    #logit = probs_to_logits(probs, is_binary=True)
     loss = -F.relu(logit) + torch.mul(target, logit) - torch.log(1. + torch.exp( -logit.abs() ))
-    loss = torch.sum(loss, 1)
+    loss = torch.sum(loss, (0,2))/(target.size(2) * target.size(0))
     return loss
 
 

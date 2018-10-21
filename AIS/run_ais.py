@@ -19,15 +19,12 @@ from utils import sigmoidal_schedule
 import sys
 sys.path.append('..')
 import unsup.models as models
-import unsup.data as data_utils
-
-#import unsup_images.models as image_models
+import unsup.data as unsup_data
 #sys.path.append('/nfs01/wm326/bvae/')
 #import vae_images.mnist_unsup.models as image_models
 
 #from hparams import get_default_hparams
 from torchvision import datasets, transforms
-import itertools
 
 import argparse
 
@@ -40,16 +37,16 @@ parser.add_argument('--zdim', type=int, default = 20, metavar = 'S',
 parser.add_argument('--num-steps', type=int, default = 500, help = 'number of steps to run AIS for')
 parser.add_argument('--num-samples', type=int, default = 16, help='number of chains to run AIS over')
 parser.add_argument('--data_path', type=str, default='/scratch/datasets/', help='location of mnist dataset')
-parser.add_argument('--seed', type=int, default = 1, help='random seed')
-parser.add_argument('--device', type=int, default=None)
-
+parser.add_argument('--bptt', type=int, default=35, help='sequence length')
+parser.add_argument('--dropout', type=float, default=0.5, help='dropout applied to layers (0 = no dropout)')
+parser.add_argument('--tied', action='store_true', help='tie the word embedding and softmax weights')
+parser.add_argument('--batch_size', type=int, default=64, metavar='N', help='batch size')
+parser.add_argument('--nhid', type=int, default=200, help='number of hidden units per layer')
+parser.add_argument('--nlayers', type=int, default=2,
+                    help='number of layers')
 args = parser.parse_args()
-#if args.device is not None:
-#    import os
-#    os.system('export CUDA_VISIBLE_DEVICES='+str(args.device))
-
 torch.backends.cudnn.benchmark = True
-torch.manual_seed(args.seed)
+torch.manual_seed(1)
 
 
 def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_sample=100):
@@ -83,78 +80,48 @@ def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_samp
 
     return forward_logws
 
-def construct_model_and_dataset(dataset=args.dataset, data_path=args.data_path):
-    if dataset == 'MNIST':
-        to_bernoulli = lambda x: transforms.ToTensor()(x).bernoulli()
+def construct_model_and_loader():
+    ###############################################################################
+    #define the model
+    ###############################################################################
+    print('Using model %s' % args.model)
+    model_cfg = getattr(models, args.model)
 
-        #use a variant of test loader so we don't have to re-generate the batch stuff
-        test_loader = torch.utils.data.DataLoader(
-            datasets.MNIST(data_path, train=False, transform=to_bernoulli, download=True),
-            batch_size=10000, shuffle=True)
+    ###############################################################################
+    # Load data
+    ###############################################################################
+    loaders, ntokens = unsup_data.loaders(args.dataset, args.data_path, args.batch_size, args.bptt, 
+                            model_cfg.transform_train, model_cfg.transform_test,
+                            use_validation=False, use_cuda=True)
 
+    ###############################################################################
+    # Build the model
+    ###############################################################################
+    print('Preparing model')
+    print(*model_cfg.args)
+    print('using ', args.zdim, ' latent space')
+    model = model_cfg.base(*model_cfg.args, 
+                        noise_dim=args.zdim, zdim=args.zdim, 
+                        ntoken=ntokens, ninp=200, nhidden=args.nhid, 
+                        nlayers=args.nlayers, bsz=args.batch_size, 
+                        dropout=args.dropout, tie_weights=args.tied,
+                        **model_cfg.kwargs)
+    model.cuda()
+
+    if args.dataset == 'MNIST' and args.batch_size == 10000:
         # store data + label on cuda for speed
-        for (data, label) in test_loader:
+        for (data, label) in loaders['test']:
             test_tensor_list = (data.cuda(async=False).view(-1, 784), label.cuda(async=False))
         class myiterator:
             def __iter__(self):
                 return iter([test_tensor_list])
 
-        loader = myiterator()
+        loaders['test'] = myiterator()
 
-        if args.model=='BAEv2':
-            from bae import BAE
-            model = BAE(x_dim=784,z_dim=args.zdim,hidden_dim=400)
-        else:
-            print('Using model %s' % args.model)
-            model_cfg = getattr(image_models, args.model)
-
-            print('Preparing model')
-            print(*model_cfg.args)
-            print('using ', args.zdim, ' latent space')
-            model = model_cfg.base(*model_cfg.args, zdim=args.zdim, **model_cfg.kwargs)
-        
-    if dataset == 'ptb':
-        """import unsup_text.data as text_data
-        corpus = text_data.Corpus(data_path)
-
-        def batchify(data, bsz):
-            # Work out how cleanly we can divide the dataset into bsz parts.
-            nbatch = data.size(0) // bsz
-            # Trim off any extra elements that wouldn't cleanly fit (remainders).
-            data = data.narrow(0, 0, nbatch * bsz)
-            # Evenly divide the data across the bsz batches.
-            data = data.view(bsz, -1).t().contiguous()
-            #if args.cuda:
-            data = data.cuda(async=True)
-            return data
-
-        loader_batches = batchify(corpus.test, 64)[0:35, :]
-
-        def get_batch(i, source=loader_batches, evaluation=False):
-            seq_len = min(35, len(source) - 1 - i)
-            data = Variable(source[i:i+seq_len], volatile=evaluation)
-            target = Variable(source[i+1:i+1+seq_len].view(-1))
-            return data, target
-
-        loader = itertools.starmap(get_batch, zip(range(0, loader_batches.size(0) - 1, 35)))"""
-        corpus = data_utils.Corpus(data_path)
-        loader_batches = data_utils.batchify(corpus.test, 64)[0:35, :]
-        loader = data_utils.TextDataLoader(loader_batches, 35)
-
-        print('Using model %s' % args.model)
-        model_cfg = getattr(models, args.model)
-
-        model = model_cfg.base(*model_cfg.args, zdim = args.zdim, noise_dim = args.zdim, ntoken = len(corpus.dictionary),
-                                ninp = 200, nhidden = 200, nlayers = 2, bsz = 64)
-        
-    return model, loader
-
-def main(f=args.file, dataset = args.dataset, data_path=args.data_path, num_samples=args.num_samples, num_steps=args.num_steps):
-    model, loader = construct_model_and_dataset(dataset, data_path=data_path)
-
-    #model.to(args.device)
-    model.cuda()
-    #model.device = args.device
+    return model, loaders['test']
+       
+def main(f=args.file):
+    model, loader = construct_model_and_loader()
     
     print('Loading provided model')
     # there may be discrepancies in how the model was saved
@@ -165,15 +132,11 @@ def main(f=args.file, dataset = args.dataset, data_path=args.data_path, num_samp
 
     model.load_state_dict(model_state_dict)
 
-    model.train()
+    #model.eval()
 
     # run num_steps of AIS in batched mode with num_samples chains    
     # sigmoidal schedule is typically used
-    logws = forward_ais(model, loader, forward_schedule=sigmoidal_schedule(num_steps), n_sample=num_samples)
-    #print(logws)
-    #logws_numpy = logws.cpu().to_numpy()
-    import numpy as np
-    np.savez('text_results/'+args.model+'_s_'+str(args.seed)+'.npz', logws=logws[0])
+    forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples)
 
 
 if __name__ == '__main__':
