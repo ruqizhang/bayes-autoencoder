@@ -80,7 +80,7 @@ print('Preparing directory %s' % args.dir)
 os.makedirs(args.dir, exist_ok=True)
 os.makedirs(args.dir+'/results/', exist_ok=True)
 with open(os.path.join(args.dir, 'command.sh'), 'w') as f:
-    f.write('python' + ' '.join(sys.argv))
+    f.write('python ' + ' '.join(sys.argv))
     f.write('\n')
 
 

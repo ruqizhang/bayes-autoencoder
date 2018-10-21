@@ -147,10 +147,10 @@ class baeLSTM(nn.Module):
 
         return decoder_output, decoder_hidden
 
-    def criterion(self, recon, data, target):
+    def criterion(self, recon, data, target, reduction='elementwise_mean'):
         recon = recon.view(-1, self.ntoken)
 
-        return torch.nn.functional.cross_entropy(recon, target)
+        return torch.nn.functional.cross_entropy(recon, target,reduction=reduction)
 
 class BAE_LSTM:
     args = list()

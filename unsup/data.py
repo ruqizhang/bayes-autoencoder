@@ -67,7 +67,7 @@ class TextDataLoader(object):
     def __init__(self, dataset, bptt):
         self.bptt = bptt
         self.dataset = dataset
-        
+
     def get_batch(self, i):
         seq_len = min(self.bptt, len(self.dataset) - 1 - i)
 

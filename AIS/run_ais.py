@@ -25,7 +25,7 @@ import unsup.data as unsup_data
 
 #from hparams import get_default_hparams
 from torchvision import datasets, transforms
-
+import numpy as np
 import argparse
 
 parser = argparse.ArgumentParser(description='AIS with bayesian auto-encoder')
@@ -42,8 +42,8 @@ parser.add_argument('--dropout', type=float, default=0.5, help='dropout applied 
 parser.add_argument('--tied', action='store_true', help='tie the word embedding and softmax weights')
 parser.add_argument('--batch_size', type=int, default=64, metavar='N', help='batch size')
 parser.add_argument('--nhid', type=int, default=200, help='number of hidden units per layer')
-parser.add_argument('--nlayers', type=int, default=2,
-                    help='number of layers')
+parser.add_argument('--nlayers', type=int, default=2, help='number of layers')
+parser.add_argument('--seed', type=int, default=1, help = 'random seed to use')
 args = parser.parse_args()
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(1)
@@ -97,13 +97,17 @@ def construct_model_and_loader():
     ###############################################################################
     # Build the model
     ###############################################################################
+    if args.num_samples > 1:
+        model_batch_size = args.num_samples * args.batch_size
+    else:
+        model_batch_size = args.batch_size
     print('Preparing model')
     print(*model_cfg.args)
     print('using ', args.zdim, ' latent space')
     model = model_cfg.base(*model_cfg.args, 
                         noise_dim=args.zdim, zdim=args.zdim, 
                         ntoken=ntokens, ninp=200, nhidden=args.nhid, 
-                        nlayers=args.nlayers, bsz=args.batch_size, 
+                        nlayers=args.nlayers, bsz=model_batch_size, 
                         dropout=args.dropout, tie_weights=args.tied,
                         **model_cfg.kwargs)
     model.cuda()
@@ -121,6 +125,8 @@ def construct_model_and_loader():
     return model, loaders['test']
        
 def main(f=args.file):
+    torch.manual_seed(args.seed)
+
     model, loader = construct_model_and_loader()
     
     print('Loading provided model')
@@ -136,8 +142,10 @@ def main(f=args.file):
 
     # run num_steps of AIS in batched mode with num_samples chains    
     # sigmoidal schedule is typically used
-    forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples)
-
+    logws = forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples)
+    batch_logw = [logw.mean().cpu().data.numpy() for logw in logws]
+    logw_full = np.mean(batch_logw)
+    np.savez('text_results/'+args.model+'_seed_'+str(args.seed)+'.npz', logws=logw_full)
 
 if __name__ == '__main__':
     main()
