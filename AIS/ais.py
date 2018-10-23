@@ -38,10 +38,9 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
         log_prior = log_normal(z, torch.zeros_like(z), torch.zeros_like(z))
         #log_likelihood = log_likelihood_fn(model.decoder(emb, z).view_as(data), data)
-        log_likelihood = model.criterion(model.decoder(emb, z), data, target, reduction='none').view_as(data).mean(dim=0)
-        #print(log_likelihood.size(), log_prior.size())
+        log_likelihood = -model.criterion(model.decoder(emb, z), data, target, reduction='none').view_as(data).mean(dim=0)
+        print(log_likelihood.sum(), log_prior.sum())
         
-        #print(log_prior.mean(), log_likelihood.mean())
         return log_prior + log_likelihood.mul_(t)
 
     # shorter aliases
@@ -74,7 +73,7 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         data = data.view(d0,d1,10000)"""
 
         # batch of step sizes, one for each chain
-        epsilon = torch.ones(B, device = batch.device).mul_(0.01)
+        epsilon = torch.ones(B, device = batch.device).mul_(1.0)
         # accept/reject history for tuning step size
         accept_hist = torch.zeros(B, device = batch.device)
 
@@ -83,16 +82,11 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         #logw.requires_grad = False
 
         # initial sample of z
-        current_z = torch.randn(B, z_size, device = batch.device, requires_grad = True)
-        """
         if mode == 'forward':
-            current_z = torch.randn(B, z_size, dtype=batch.dtype, device = batch.device)
-            #current_z = model.encode(batch)
-            #current_z.detach_()
-            current_z.requires_grad = True
+            current_z = torch.randn(B, z_size, device = batch.device, requires_grad = True)
         else:
             current_z = safe_repeat(post_z, n_sample).type(batch.dtype).device(batch.device)
-            current_z.requires_grad = True"""
+            current_z.requires_grad = True
 
         for j, (t0, t1) in tqdm(enumerate(zip(schedule[:-1], schedule[1:]), 1)):
             emb = model.embed(batch)
@@ -100,6 +94,7 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
             # update log importance weight
             log_int_1 = log_f_i(current_z, emb, batch, target, t0).data
             log_int_2 = log_f_i(current_z, emb, batch, target, t1).data
+            #print(log_int_1.mean(), log_int_2.mean())
             logw.data.add_(log_int_2 - log_int_1)
 
             del log_int_1, log_int_2
@@ -133,11 +128,9 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
                                                             epsilon,
                                                             accept_hist, j,
                                                             U, K=normalized_kinetic)
-                                                            
 
         # IWAE lower bound
         logw = log_mean_exp(logw.view(n_sample, -1).transpose(0, 1))
-
         if mode == 'backward':
             logw = -logw
 

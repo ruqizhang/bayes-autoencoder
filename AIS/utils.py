@@ -90,7 +90,7 @@ def discretized_logistic(mu, logs, x):
 
 
 def log_mean_exp(x):
-
+    print(x.size())
     max_, _ = torch.max(x, 1, keepdim=True)
     return torch.log(torch.mean(torch.exp(x - max_), 1)) + torch.squeeze(max_)
 
