@@ -1,0 +1,10 @@
+*.pyc
+._*
+*.npz
+*.log
+*.tar
+*.png
+*.out
+*.csv
+*.sh
+*.txt
