@@ -41,7 +41,7 @@ class Encode(nn.Module):
 
 class Decode(nn.Module):
 
-    def __init__(self, x_dim,z_dim,hidden_dim,vocab_size,dropout,bsz,device_id):
+    def __init__(self, x_dim,z_dim,hidden_dim,vocab_size,dropout,bsz):
         super(Decode, self).__init__()
         self.z_dim = z_dim
         self.hidden_dim = hidden_dim
@@ -50,7 +50,7 @@ class Decode(nn.Module):
         self.fc4 = nn.Linear(hidden_dim,vocab_size)
         self.drop = nn.Dropout(dropout)
         self.bsz = bsz
-        self.device_id = device_id
+        #self.device_id = device_id
         self.init_weights()
     def init_weights(self):
         initrange = 0.1
@@ -60,7 +60,8 @@ class Decode(nn.Module):
         self.fc4.weight.data.uniform_(-initrange, initrange)
 
     def forward(self,x_emb, z):
-        c0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
+        #c0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
+        c0 = torch.zeros((1, self.bsz, self.hidden_dim), device = z.device, dtype = z.dtype)
         h0 = self.fc5(z)
         h0 = h0.unsqueeze(0)
         # h0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
@@ -70,22 +71,23 @@ class Decode(nn.Module):
         recon_batch = self.fc4(ht)
         return recon_batch
 
-class VAE_LSTM(nn.Module):
+class vaeLSTM(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ntoken, ninp, nhid, z_dim,nlayers, device_id, bsz,dropout=0.5, tie_weights=False):
-        super(VAE_LSTM, self).__init__()
+    def __init__(self, ntoken, ninp, nhidden, zdim, noise_dim, nlayers, bsz,dropout=0.5, tie_weights=False):
+        super(vaeLSTM, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.word_embeddings = nn.Embedding(ntoken, ninp)
-        self.encoder = Encode(ninp,z_dim,nhid,ntoken,dropout)
-        self.decoder = Decode(ninp,z_dim,nhid,ntoken,dropout,bsz,device_id)
-        self.rnn_type = rnn_type
-        self.nhid = nhid
+        self.encoder = Encode(ninp,zdim,nhidden,ntoken,dropout)
+        self.decoder = Decode(ninp,zdim,nhidden,ntoken,dropout,bsz)
+        self.z_dim = zdim
+        self.nhid = nhidden
         self.nlayers = nlayers
-        self.device_id = device_id
+        #self.device_id = device_id
         self.bsz = bsz
         self.ntoken = ntoken
         self.init_weights()
+
     def init_weights(self):
         initrange = 0.1
         self.word_embeddings.weight.data.uniform_(-initrange, initrange)
@@ -94,16 +96,32 @@ class VAE_LSTM(nn.Module):
     def reparameterize(self, mu, logvar):
         if self.training:
           std = logvar.mul(0.5).exp_()
-          eps = Variable(std.data.new(std.size()).normal_())
-          eps.cuda(self.device_id)
+          #eps = Variable(std.data.new(std.size()).normal_())
+          eps = torch.zeros_like(std).normal_()
+          #eps.cuda(self.device_id)
           return eps.mul(std).add_(mu)
         else:
           return mu
 
-    def forward(self, input):
+    def forward(self, input, z = None):
         emb = self.drop(self.word_embeddings(input))
         mu,logvar = self.encoder(emb)
 
-        z = self.reparameterize(mu, logvar)
-        recon_batch = self.decoder(emb,z)
-        return recon_batch, mu,logvar
+        if z is None:
+            z = self.reparameterize(mu, logvar)
+            recon_batch = self.decoder(emb,z)
+            return recon_batch, mu,logvar
+        else:
+            recon_batch = self.decoder(emb, z)
+            return recon_batch, z, None
+
+    def criterion(self, recon, data, target, reduction='elementwise_mean'):
+        recon = recon.view(-1, self.ntoken)
+
+        return torch.nn.functional.cross_entropy(recon, target,reduction=reduction)
+
+class VAE_LSTM:
+    args = list()
+    kwargs = {}
+    transform_train, transform_test = None, None
+    base = vaeLSTM

@@ -51,7 +51,11 @@ def log_normal_full_cov(x, mean, L):
 
     return term1 + term2
 
-
+def z_prior_loss(z):
+    prior_distribution = torch.distributions.Normal(torch.zeros_like(z), torch.ones_like(z))
+    prior_loss = -prior_distribution.log_prob(z).sum()
+    return prior_loss
+    
 def log_bernoulli(probs, target):
     """
     Args:

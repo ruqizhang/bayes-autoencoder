@@ -136,10 +136,10 @@ try:
         epoch_start_time = time.time()
 
         #train
-        utils.train(epoch, loaders['train'], model, optimizer, ntokens, \
+        """utils.train(epoch, loaders['train'], model, optimizer, ntokens, \
                     args.lr, args.alpha, args.J, args.burnin, prior_std, args.clip, \
                     args.log_interval, args.bptt, \
-                    gibbs = args.gibbs)
+                    gibbs = args.gibbs)"""
 
         #validate
         with torch.no_grad():

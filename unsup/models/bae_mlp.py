@@ -24,10 +24,14 @@ class baeMLP(nn.Module):
     def decoder(self, z):
         return nn.Sigmoid()(self.decode(z))
     
-    def forward(self, x):
+    def forward(self, x, z = None):
         x = x.view(-1,self.dim)
 
-        z, noise = self.encoder(x)
+        if z is None:
+            z, noise = self.encoder(x)
+        else:
+            noise = None
+            
         reconstructed_batch = self.decoder(z)
         return reconstructed_batch, z, noise
     

@@ -58,11 +58,12 @@ def evaluate(data_source, model, dim, epoch, dir):
         #draw 100 samples from p(z|x, theta)
         for _ in range(100):
             with torch.no_grad():
-                recon_batch,_,_ = model(data)
+                recon_batch,z_sample,_ = model(data)
 
                 BCE = model.criterion(recon_batch, data, targets)
-
-                loss = BCE
+                
+                loss = BCE + z_prior_loss(z_sample)/(z_sample.size(0) * z_sample.size(1) * 35)
+                
                 total_loss += loss.item()
                 
                 if count == 0 and type(model)==models.bae_mlp.baeMLP:
@@ -97,11 +98,12 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
                 optimizer.zero_grad()
                 z_optimizer.zero_grad()
 
-                if type(model)==models.bae_lstm.baeLSTM:
+                """if type(model)==models.bae_lstm.baeLSTM:
                     emb = model.embed(data)
                     recon_batch = model.decoder(emb,z_sample)
                 else:
-                    recon_batch = model.decoder(z_sample)
+                    recon_batch = model.decoder(z_sample)"""
+                recon_batch = model.decode(data, z_sample)
 
             BCE = model.criterion(recon_batch, data, targets)
             #if type(model)==models.bae_lstm.baeLSTM:
