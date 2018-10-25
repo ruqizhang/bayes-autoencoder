@@ -103,7 +103,7 @@ def train(epoch, loader, model, optimizer, dim, lr, alpha, J, burnin, prior_std,
                     recon_batch = model.decoder(emb,z_sample)
                 else:
                     recon_batch = model.decoder(z_sample)"""
-                recon_batch = model.decode(data, z_sample)
+                recon_batch, _, _ = model.forward(data, z_sample)
 
             BCE = model.criterion(recon_batch, data, targets)
             #if type(model)==models.bae_lstm.baeLSTM:
