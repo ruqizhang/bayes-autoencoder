@@ -45,9 +45,9 @@ class Encode(nn.Module):
         # h0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         s0 = (h0,c0)
         lstm_out, _ = self.lstm(x,s0)
-        lstm_out = lstm_out[-1,:,:]
-        lstm_out = self.drop(lstm_out)
-        z = self.fc21(lstm_out)
+        lstm_out_min1 = lstm_out[-1,:,:]
+        lstm_out_dropout = self.drop(lstm_out_min1)
+        z = self.fc21(lstm_out_dropout)
         return z,xi
 
 class Decode(nn.Module):
@@ -75,13 +75,13 @@ class Decode(nn.Module):
     def forward(self,x_emb, z):
         #c0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         c0 = torch.zeros((1, self.bsz, self.hidden_dim), device = x_emb.device, dtype = x_emb.dtype)
-        h0 = self.fc5(z)
-        h0 = h0.unsqueeze(0)
+        h0_squeezed = self.fc5(z)
+        h0 = h0_squeezed.unsqueeze(0)
         # h0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         s0 = (h0,c0)
         ht,st = self.lstm(x_emb,s0)
-        ht = self.drop(ht)
-        recon_batch = self.fc4(ht)
+        ht_new = self.drop(ht)
+        recon_batch = self.fc4(ht_new)
         return recon_batch.view(-1,self.vocab_size)
 
 class baeLSTM(nn.Module):
@@ -152,10 +152,10 @@ class baeLSTM(nn.Module):
 
         return decoder_output, decoder_hidden
 
-    def criterion(self, recon, data, target, reduction='elementwise_mean'):
+    def criterion(self, recon, data, target, **kwargs):
         recon = recon.view(-1, self.ntoken)
 
-        return torch.nn.functional.cross_entropy(recon, target, reduction=reduction)
+        return torch.nn.functional.cross_entropy(recon, target, **kwargs)
 
 class BAE_LSTM:
     args = list()

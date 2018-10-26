@@ -10,7 +10,7 @@ from tqdm import tqdm
 #import sys
 #sys.path.append('..')
 
-def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 500), n_sample=100):
+def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 500), n_sample=100, prior_fn=lambda z: -z_prior_loss(z)):
     """Compute annealed importance sampling trajectories for a batch of data. 
     Could be used for *both* forward and reverse chain in bidirectional Monte Carlo
     (default: forward chain with linear schedule).
@@ -32,7 +32,7 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
     assert mode == 'forward' or mode == 'backward', 'Should have either forward/backward mode'
 
-    def log_f_i(z, data, target, t, log_likelihood_fn=log_bernoulli):
+    def log_f_i(z, data, target, t, prior_fn=prior_fn):
         """Unnormalized density for intermediate distribution `f_i`:
             f_i = p(z)^(1-t) p(x,z)^(t) = p(z) p(x|z)^t
         =>  log f_i = log p(z) + t * log p(x|z)
@@ -40,15 +40,21 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         #zeros = torch.zeros(B, z.size(1), dtype = z.dtype, device = z.device)
         #log_prior = log_normal(z, zeros, zeros).sum()
         #log_prior = -z_prior_loss(z)
+        log_prior = -prior_fn(z, data) / (z.size(0) * z.size(1) * data.size(0))
         #log_prior/= (z.size(0) * z.size(1) * data.size(0))
 
         model_output = model.forward(data, z)
         recon_batch = model_output[0]
-        log_likelihood = -model.criterion(recon_batch, data, target)
-        #print(log_likelihood, log_prior)
+        log_likelihood = -model.criterion(recon_batch, data, target, reduction='none').view_as(data).mean(0)
+        #print(log_likelihood)
         
-        log_prior = 0.0
-        return log_prior + log_likelihood.mul_(t)
+        #likelihood_prior =  -z_prior_loss(z)/(z.size(0) * z.size(1) * data.size(0))
+        likelihood_prior = z.pow(2.0).sum(dim=1)/(z.size(0) * z.size(1) * data.size(0))
+        log_joint_likelihood = log_likelihood + likelihood_prior
+        #log_joint_likelihood = likelihood_prior
+        log_prior = torch.zeros_like(log_joint_likelihood)
+        #print(log_prior.sum().cpu().item(), likelihood_prior.sum().cpu().item(), log_likelihood.sum().cpu().item())
+        return log_prior.mul(1-t) + log_joint_likelihood.mul(t)
 
     # shorter aliases
     try:
@@ -70,7 +76,7 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         B = batch.size(1) * n_sample
         batch = safe_repeat(batch, n_sample)
         # batch of step sizes, one for each chain
-        epsilon = torch.ones(B, device = batch.device).mul_(0.1)
+        epsilon = torch.ones(B, device = batch.device).mul_(1e-4)
         # accept/reject history for tuning step size
         accept_hist = torch.zeros(B, device = batch.device)
 
@@ -99,20 +105,21 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
                 del log_int_1, log_int_2
 
             # resample speed
-            current_v = torch.randn(current_z.size(), device=batch.device, requires_grad = False)
+            current_v = torch.randn(current_z.size(), device=batch.device, requires_grad = False) * 0.0
 
             def U(z):
                 return -log_f_i(z, batch, target, t1)
 
             def grad_U(z):
                 # grad w.r.t. outputs; mandatory in this case
-                #grad_outputs = torch.ones(B, device = batch.device)
+                grad_outputs = torch.ones(B, device = batch.device)
                 #grad_outputs = torch.ones_like(z)
-                #grad = torchgrad(U(z), z, grad_outputs=grad_outputs)[0]
-                grad = torch.autograd.grad(U(z), z)[0]
+                grad = torchgrad(U(z), z, grad_outputs=grad_outputs)[0]
+                #grad = torch.autograd.grad(U(z), z)[0]
                 # clip by norm
                 grad = torch.clamp(grad, -B*z_size*100, B*z_size*100)
                 grad.requires_grad = True
+                #print(grad.norm())
                 return grad
 
             def normalized_kinetic(v):
@@ -129,14 +136,16 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
                                                             accept_hist, j,
                                                             U, K=normalized_kinetic)
             #print('acceptance rate: ', accept_hist.mean()/(j+1) )
-            
-            with torch.no_grad():
+            #print('mean epsilon:', epsilon.mean())
+            """with torch.no_grad():
                 model.eval()
                 out,_,_ = model(batch, current_z)
-                print('eval p(x|z): ', model.criterion(out, batch, target))
-                model.train()
+                print('eval p(x|z): ', model.criterion(out, batch, target).cpu().item(), current_z.var().cpu().item())
+                model.train()"""
             
         # IWAE lower bound
+        print(logw)
+        #raise(EnvironmentError('done'))
         logw = log_mean_exp(logw.view(n_sample, -1).transpose(0, 1))
         print(logw.size())
         if mode == 'backward':

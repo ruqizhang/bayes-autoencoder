@@ -115,10 +115,10 @@ class vaeLSTM(nn.Module):
             recon_batch = self.decoder(emb, z)
             return recon_batch, z, None
 
-    def criterion(self, recon, data, target, reduction='elementwise_mean'):
+    def criterion(self, recon, data, target, **kwargs):
         recon = recon.view(-1, self.ntoken)
 
-        return torch.nn.functional.cross_entropy(recon, target,reduction=reduction)
+        return torch.nn.functional.cross_entropy(recon, target, **kwargs)
 
 class VAE_LSTM:
     args = list()

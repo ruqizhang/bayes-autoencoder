@@ -64,7 +64,7 @@ def accept_reject(current_z, current_v,
     prob = torch.exp(current_Hamil - propose_Hamil)
     uniform_sample = torch.rand(prob.size(), dtype=mdtype, device=mdevice)
     #uniform_sample = Variable(uniform_sample.type(mdtype))
-    accept = (prob > uniform_sample).float()
+    accept = (prob > uniform_sample).type(mdtype)
     z = z.mul(accept.view(-1, 1)) + current_z.mul(1. - accept.view(-1, 1))
 
     accept_hist = accept_hist.add(accept)
