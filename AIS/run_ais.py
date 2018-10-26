@@ -49,7 +49,7 @@ torch.backends.cudnn.benchmark = True
 torch.manual_seed(1)
 
 
-def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_sample=100):
+def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_sample=100, prior_fn = lambda v, data: -v.pow(2.0).sum()):
     """Bidirectional Monte Carlo. Integrate forward and backward AIS.
     The backward schedule is the reverse of the forward.
 
@@ -68,7 +68,7 @@ def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_samp
     load, _ = itertools.tee(loader, 2)
 
     # forward chain
-    forward_logws = ais_trajectory(model, load, mode='forward', schedule=forward_schedule, n_sample=n_sample)
+    forward_logws = ais_trajectory(model, load, mode='forward', schedule=forward_schedule, n_sample=n_sample, prior_fn=prior_fn)
 
     lower_bounds = []
 
@@ -139,10 +139,17 @@ def main(f=args.file):
     model.load_state_dict(model_state_dict)
 
     #model.eval()
+    if "VAE" in args.model:
+        def prior_fn(z, data):
+            _, mu, logvar = model(data)
+            return -torch.distributions.Normal(mu, logvar.exp()).log_prob(z).sum(dim=1)
+    else:
+        def prior_fn(z, data):
+            return -torch.distributions.Normal(torch.zeros_like(z), torch.ones_like(z)).log_prob(z).sum(dim=1)
 
     # run num_steps of AIS in batched mode with num_samples chains    
     # sigmoidal schedule is typically used
-    logws = forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples)
+    logws = forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples, prior_fn=prior_fn)
     batch_logw = [logw.mean().cpu().data.numpy() for logw in logws]
     logw_full = np.mean(batch_logw)
     np.savez('text_results/'+args.model+'_seed_'+str(args.seed)+'.npz', logws=logw_full)
