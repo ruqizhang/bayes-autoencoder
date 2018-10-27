@@ -8,7 +8,7 @@ from hmc import hmc_trajectory, accept_reject
 from tqdm import tqdm
 
 
-def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 500), n_sample=100):
+def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 500), n_sample=100, prior_fn=lambda z: -z_prior_loss(z)):
     """Compute annealed importance sampling trajectories for a batch of data. 
     Could be used for *both* forward and reverse chain in bidirectional Monte Carlo
     (default: forward chain with linear schedule).
@@ -30,16 +30,27 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
     assert mode == 'forward' or mode == 'backward', 'Should have either forward/backward mode'
 
-    def log_f_i(z, data, t, log_likelihood_fn=log_bernoulli):
+    def log_f_i(z, data, target, t, log_likelihood_fn=log_bernoulli, prior_fn=prior_fn):
         """Unnormalized density for intermediate distribution `f_i`:
             f_i = p(z)^(1-t) p(x,z)^(t) = p(z) p(x|z)^t
         =>  log f_i = log p(z) + t * log p(x|z)
         """
-        zeros = torch.zeros(B, z_size, dtype = z.dtype, device = z.device)
+        """zeros = torch.zeros(B, z_size, dtype = z.dtype, device = z.device)
         log_prior = log_normal(z, zeros, zeros)
         log_likelihood = log_likelihood_fn(model.decoder(z), data)
 
-        return log_prior + log_likelihood.mul_(t)
+        return log_prior + log_likelihood.mul_(t)"""
+        log_approx = -prior_fn(z, data) #/ (z.size(0) * z.size(1))
+        model_output = model.forward(data, z)
+        recon_batch = model_output[0]
+
+        log_likelihood = -model.criterion(recon_batch, data, target, reduction='none').view_as(data).sum(1)
+        log_prior = z.pow(2.0).sum(dim=1)#/(z.size(0) * z.size(1))
+
+        log_joint_likelihood = log_likelihood + log_prior
+        #print(log_likelihood.sum().cpu().item(), log_approx.mean(), log_prior.mean())
+
+        return log_approx.mul(1-t) + log_joint_likelihood.mul(t)
 
     # shorter aliases
     try:
@@ -56,12 +67,12 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
     print ('In %s mode' % mode)
 
-    for i, (batch, post_z) in enumerate(loader):
+    for i, (batch, target) in enumerate(loader):
 
         B = batch.size(0) * n_sample
         batch = safe_repeat(batch, n_sample)
         # batch of step sizes, one for each chain
-        epsilon = torch.ones(B, dtype = batch.dtype, device = batch.device).mul_(0.01)
+        epsilon = torch.ones(B, dtype = batch.dtype, device = batch.device).mul_(1e-4)
         # accept/reject history for tuning step size
         accept_hist = torch.zeros(B, dtype = batch.dtype, device = batch.device)
 
@@ -71,9 +82,9 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
         # initial sample of z
         if mode == 'forward':
-            current_z = torch.randn(B, z_size, dtype=batch.dtype, device = batch.device)
-            #current_z = model.encode(batch)
-            #current_z.detach_()
+            #current_z = torch.randn(B, z_size, dtype=batch.dtype, device = batch.device)
+            current_z = model.forward(batch)[1]
+            current_z.detach_()
             current_z.requires_grad = True
         else:
             current_z = safe_repeat(post_z, n_sample).type(batch.dtype).device(batch.device)
@@ -81,17 +92,18 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
 
         for j, (t0, t1) in tqdm(enumerate(zip(schedule[:-1], schedule[1:]), 1)):
             # update log importance weight
-            log_int_1 = log_f_i(current_z, batch, t0).data
-            log_int_2 = log_f_i(current_z, batch, t1).data
-            logw.data.add_(log_int_2 - log_int_1)
+            with torch.no_grad():
+                log_int_1 = log_f_i(current_z, batch, target, t0).data
+                log_int_2 = log_f_i(current_z, batch, target, t1).data
+                logw.data.add_(log_int_2 - log_int_1)
 
-            del log_int_1, log_int_2
+                del log_int_1, log_int_2
 
             # resample speed
             current_v = torch.randn(current_z.size(), dtype=batch.dtype, device=batch.device, requires_grad = False)
 
             def U(z):
-                return -log_f_i(z, batch, t1)
+                return -log_f_i(z, batch, target, t1)
 
             def grad_U(z):
                 # grad w.r.t. outputs; mandatory in this case

@@ -19,13 +19,13 @@ from utils import sigmoidal_schedule
 import sys
 sys.path.append('..')
 import unsup.models as models
-
+import unsup.data as unsup_data
 #sys.path.append('/nfs01/wm326/bvae/')
 #import vae_images.mnist_unsup.models as image_models
 
 #from hparams import get_default_hparams
 from torchvision import datasets, transforms
-
+import numpy as np
 import argparse
 
 parser = argparse.ArgumentParser(description='AIS with bayesian auto-encoder')
@@ -37,13 +37,19 @@ parser.add_argument('--zdim', type=int, default = 20, metavar = 'S',
 parser.add_argument('--num-steps', type=int, default = 500, help = 'number of steps to run AIS for')
 parser.add_argument('--num-samples', type=int, default = 16, help='number of chains to run AIS over')
 parser.add_argument('--data_path', type=str, default='/scratch/datasets/', help='location of mnist dataset')
-
+parser.add_argument('--bptt', type=int, default=35, help='sequence length')
+parser.add_argument('--dropout', type=float, default=0.5, help='dropout applied to layers (0 = no dropout)')
+parser.add_argument('--tied', action='store_true', help='tie the word embedding and softmax weights')
+parser.add_argument('--batch_size', type=int, default=64, metavar='N', help='batch size')
+parser.add_argument('--nhid', type=int, default=200, help='number of hidden units per layer')
+parser.add_argument('--nlayers', type=int, default=2, help='number of layers')
+parser.add_argument('--seed', type=int, default=1, help = 'random seed to use')
 args = parser.parse_args()
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(1)
 
 
-def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_sample=100):
+def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_sample=100, prior_fn = lambda v, data: -v.pow(2.0).sum()):
     """Bidirectional Monte Carlo. Integrate forward and backward AIS.
     The backward schedule is the reverse of the forward.
 
@@ -59,10 +65,10 @@ def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_samp
     """
 
     # iterator is exhaustable in py3, so need duplicate
-    load, load_ = itertools.tee(loader, 2)
+    load, _ = itertools.tee(loader, 2)
 
     # forward chain
-    forward_logws = ais_trajectory(model, load, mode='forward', schedule=forward_schedule, n_sample=n_sample)
+    forward_logws = ais_trajectory(model, load, mode='forward', schedule=forward_schedule, n_sample=n_sample, prior_fn=prior_fn)
 
     lower_bounds = []
 
@@ -74,65 +80,54 @@ def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_samp
 
     return forward_logws
 
-if args.dataset == 'MNIST':
-    to_bernoulli = lambda x: transforms.ToTensor()(x).bernoulli()
-
-    #use a variant of test loader so we don't have to re-generate the batch stuff
-    test_loader = torch.utils.data.DataLoader(
-        datasets.MNIST(args.data_path, train=False, transform=to_bernoulli, download=True),
-        batch_size=10000, shuffle=True)
-
-    # store data + label on cuda for speed
-    for (data, label) in test_loader:
-        test_tensor_list = (data.cuda(async=False).view(-1, 784), label.cuda(async=False))
-    class myiterator:
-        def __iter__(self):
-            return iter([test_tensor_list])
-
-    loader = myiterator()
-
-    if args.model=='BAEv2':
-        from bae import BAE
-        model = BAE(x_dim=784,z_dim=args.zdim,hidden_dim=400)
-    else:
-        print('Using model %s' % args.model)
-        model_cfg = getattr(models, args.model)
-
-        print('Preparing model')
-        print(*model_cfg.args)
-        print('using ', args.zdim, ' latent space')
-        model = model_cfg.base(*model_cfg.args, zdim=args.zdim, noise_dim = args.zdim, **model_cfg.kwargs)
-        
-
-if args.dataset == 'ptb':
-    import unsup_text.data as text_data
-    corpus = text_data.Corpus(args.data_path)
-
-    def batchify(data, bsz):
-        # Work out how cleanly we can divide the dataset into bsz parts.
-        nbatch = data.size(0) // bsz
-        # Trim off any extra elements that wouldn't cleanly fit (remainders).
-        data = data.narrow(0, 0, nbatch * bsz)
-        # Evenly divide the data across the bsz batches.
-        data = data.view(bsz, -1).t().contiguous()
-        #if args.cuda:
-        data = data.cuda(async=True)
-        return data
-
-    #eval batch size is hardcoded to 64 to match old bae_ais.py script
-    loader = batchify(corpus.test, 64) 
-    
+def construct_model_and_loader():
+    ###############################################################################
+    #define the model
+    ###############################################################################
     print('Using model %s' % args.model)
     model_cfg = getattr(models, args.model)
 
-    model = model_cfg.base(*model_cfg.args, zdim = args.zdim, ntoken = len(corpus.dictionary),
-                            ninp = 200, nhid = 200, nlayers = 2, device_id = 0, bsz = 64)
+    ###############################################################################
+    # Load data
+    ###############################################################################
+    loaders, ntokens = unsup_data.loaders(args.dataset, args.data_path, args.batch_size, args.bptt, 
+                            model_cfg.transform_train, model_cfg.transform_test,
+                            use_validation=False, use_cuda=True)
 
-def main(f=args.file):
-
-    #model.to(args.device)
+    ###############################################################################
+    # Build the model
+    ###############################################################################
+    if args.num_samples > 1:
+        model_batch_size = args.num_samples * args.batch_size
+    else:
+        model_batch_size = args.batch_size
+    print('Preparing model')
+    print(*model_cfg.args)
+    print('using ', args.zdim, ' latent space')
+    model = model_cfg.base(*model_cfg.args, 
+                        noise_dim=args.zdim, zdim=args.zdim, 
+                        ntoken=ntokens, ninp=200, nhidden=args.nhid, 
+                        nlayers=args.nlayers, bsz=model_batch_size, 
+                        dropout=args.dropout, tie_weights=args.tied,
+                        **model_cfg.kwargs)
     model.cuda()
-    #model.device = args.device
+
+    if args.dataset == 'MNIST' and args.batch_size == 10000:
+        # store data + label on cuda for speed
+        for (data, label) in loaders['test']:
+            test_tensor_list = (data.cuda(async=False).view(-1, 784), label.cuda(async=False))
+        class myiterator:
+            def __iter__(self):
+                return iter([test_tensor_list])
+
+        loaders['test'] = myiterator()
+
+    return model, loaders['test']
+       
+def main(f=args.file):
+    torch.manual_seed(args.seed)
+
+    model, loader = construct_model_and_loader()
     
     print('Loading provided model')
     # there may be discrepancies in how the model was saved
@@ -143,12 +138,23 @@ def main(f=args.file):
 
     model.load_state_dict(model_state_dict)
 
-    model.eval()
+    #model.eval()
+    if "VAE" in args.model:
+        def prior_fn(z, data):
+            _, mu, logvar = model(data)
+            #print((mu - z).norm())
+            return -torch.distributions.Normal(mu, logvar.exp()).log_prob(z).sum(dim=1)
+    else:
+        def prior_fn(z, data):
+            return -torch.distributions.Normal(torch.zeros_like(z), torch.ones_like(z)).log_prob(z).sum(dim=1)
 
     # run num_steps of AIS in batched mode with num_samples chains    
     # sigmoidal schedule is typically used
-    forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples)
-
+    logws = forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples, prior_fn=prior_fn)
+    batch_logw = [logw.mean().cpu().data.numpy() for logw in logws]
+    logw_full = np.mean(batch_logw)
+    print('final logw: ', logw_full)
+    """np.savez('text_results/'+args.model+'g_seed_'+str(args.seed)+'.npz', logws=logw_full)"""
 
 if __name__ == '__main__':
     main()
