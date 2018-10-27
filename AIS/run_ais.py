@@ -152,7 +152,7 @@ def main(f=args.file):
     logws = forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples, prior_fn=prior_fn)
     batch_logw = [logw.mean().cpu().data.numpy() for logw in logws]
     logw_full = np.mean(batch_logw)
-    np.savez('text_results/'+args.model+'_seed_'+str(args.seed)+'.npz', logws=logw_full)
+    np.savez('text_results/'+args.model+'g_seed_'+str(args.seed)+'.npz', logws=logw_full)
 
 if __name__ == '__main__':
     main()
