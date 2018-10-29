@@ -49,7 +49,7 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         #print(log_likelihood)
         
         #likelihood_prior =  -z_prior_loss(z)/(z.size(0) * z.size(1) * data.size(0))
-        likelihood_prior = z.pow(2.0).sum(dim=1)/(z.size(0) * z.size(1) * data.size(0))
+        likelihood_prior = -z.pow(2.0).sum(dim=1)/(z.size(0) * z.size(1) * data.size(0))
         log_joint_likelihood = log_likelihood + likelihood_prior
         #log_joint_likelihood = likelihood_prior
         #log_prior = torch.zeros_like(log_joint_likelihood)

@@ -44,6 +44,7 @@ parser.add_argument('--batch_size', type=int, default=64, metavar='N', help='bat
 parser.add_argument('--nhid', type=int, default=200, help='number of hidden units per layer')
 parser.add_argument('--nlayers', type=int, default=2, help='number of layers')
 parser.add_argument('--seed', type=int, default=1, help = 'random seed to use')
+parser.add_argument('--output', type=str, required=True, help='output file to save')
 args = parser.parse_args()
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(1)
@@ -152,7 +153,8 @@ def main(f=args.file):
     logws = forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples, prior_fn=prior_fn)
     batch_logw = [logw.mean().cpu().data.numpy() for logw in logws]
     logw_full = np.mean(batch_logw)
-    np.savez('text_results/'+args.model+'g_seed_'+str(args.seed)+'.npz', logws=logw_full)
+    #np.savez('text_results/'+args.model+'g_seed_'+str(args.seed)+'.npz', logws=logw_full)
+    np.savez(args.output, logws = logw_full)
 
 if __name__ == '__main__':
     main()

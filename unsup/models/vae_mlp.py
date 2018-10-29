@@ -39,6 +39,7 @@ class vaeMLP(nn.Module):
 
         if z is None:
             z = self.reparameterize(mu, logvar)
+            #print('rsampled ll: ', torch.distributions.Normal(mu, logvar.exp()).log_prob(z).sum(dim=1).mean())
             recon_batch = self.decode(z)
             return recon_batch, mu,logvar
         else:
