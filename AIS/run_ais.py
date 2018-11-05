@@ -69,7 +69,7 @@ def forward_ais(model, loader, forward_schedule=np.linspace(0., 1., 500), n_samp
 
     # forward chain
     forward_logws = ais_trajectory(model, load, mode='forward', schedule=forward_schedule, n_sample=n_sample, prior_fn=prior_fn)
-
+    print(forward_logws)
     lower_bounds = []
 
     for forward in forward_logws:
@@ -151,7 +151,7 @@ def main(f=args.file):
     # run num_steps of AIS in batched mode with num_samples chains    
     # sigmoidal schedule is typically used
     logws = forward_ais(model, loader, forward_schedule=sigmoidal_schedule(args.num_steps), n_sample=args.num_samples, prior_fn=prior_fn)
-    batch_logw = [logw.mean().cpu().data.numpy() for logw in logws]
+    batch_logw = [logw.mean() for logw in logws]
     logw_full = np.mean(batch_logw)
     print('final logw: ', logw_full)
     """np.savez('text_results/'+args.model+'g_seed_'+str(args.seed)+'.npz', logws=logw_full)"""

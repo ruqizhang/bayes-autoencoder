@@ -35,21 +35,15 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
             f_i = p(z)^(1-t) p(x,z)^(t) = p(z) p(x|z)^t
         =>  log f_i = log p(z) + t * log p(x|z)
         """
-        """zeros = torch.zeros(B, z_size, dtype = z.dtype, device = z.device)
-        log_prior = log_normal(z, zeros, zeros)
-        log_likelihood = log_likelihood_fn(model.decoder(z), data)
-
-        return log_prior + log_likelihood.mul_(t)"""
-        log_approx = -prior_fn(z, data) #/ (z.size(0) * z.size(1))
+        log_approx = prior_fn(z, data) #/ z.size(1)
         model_output = model.forward(data, z)
         recon_batch = model_output[0]
 
-        log_likelihood = -model.criterion(recon_batch, data, target, reduction='none').view_as(data).sum(1)
-        log_prior = z.pow(2.0).sum(dim=1)#/(z.size(0) * z.size(1))
+        log_likelihood = -model.criterion(recon_batch, data, target, reduction='none').sum(dim=1) * recon_batch.size(0)
+        log_prior = z.pow(2.0).sum(dim=1) #/ z.size(1)
+        print(log_likelihood[0], log_approx[0], log_prior[0])
 
         log_joint_likelihood = log_likelihood + log_prior
-        #print(log_likelihood.sum().cpu().item(), log_approx.mean(), log_prior.mean())
-
         return log_approx.mul(1-t) + log_joint_likelihood.mul(t)
 
     # shorter aliases
@@ -135,7 +129,7 @@ def ais_trajectory(model, loader, mode='forward', schedule=np.linspace(0., 1., 5
         if mode == 'backward':
             logw = -logw
 
-        logws.append(logw.data)
+        logws.append(logw.data.cpu().numpy())
 
         print ('Time elapse %.4f, last batch stats %.4f' % (time.time()-_time, logw.mean().cpu().data.numpy()))
         _time = time.time()
