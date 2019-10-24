@@ -1,8 +1,26 @@
-under construction - so far all implemented models have been tested for running, but not for accuracy
+# Bayesian Auto-encoder
 
-Example train_semisup.py call:
-  python train_semisup.py --dataset MNIST --data_path /scratch/datasets/ --epochs 3 --model SSBAE --dir exps/test --optimizer SGHMC --optimizer_options lr=1e-7 --save-epochs 1
+## Semi-sup on sentiment classification (MR dataset)
+VAE
+```
+python main_v_semi.py --model vae
+```
+BVAE
+```
+python main_v_semi.py --model bvae
+```
+BAE-S
+```
+python main_bae_semi.py 
+```
+BAE-G
+```
+python main_bae_semi.py
+```
+Ensemble for test
+```
+python main_ens.py --model MODEL
+```
+* ```MODEL``` &mdash;vae, bvae, bae, baeg
 
-Example train_unsup.py call:
-  python train_unsup.py --dataset MNIST --data_path /scratch/datasets/ --epochs 3 --model SSBAE --dir exps/test --optimizer SGHMC --optimizer_options lr=1e-7 --save-epochs 1
-
+`numlabel` controls the number of labelled data (2000 or 3000).
