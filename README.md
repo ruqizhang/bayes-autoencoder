@@ -21,6 +21,6 @@ Ensemble for test
 ```
 python main_ens.py --model MODEL
 ```
-* ```MODEL``` &mdash;vae, bvae, bae, baeg
+* ```MODEL``` &mdash; vae, bvae, bae, baeg
 
-`numlabel` controls the number of labelled data (2000 or 3000).
+*```numlabel``` &mdash; controls the number of labelled data (2000 or 3000).
