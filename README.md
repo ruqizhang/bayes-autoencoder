@@ -1,4 +1,4 @@
-# Bayesian Auto-encoder
+# Bayesian Auto-Encoders
 
 ## Semi-sup on sentiment classification (MR dataset)
 VAE
