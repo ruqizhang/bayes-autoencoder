@@ -101,7 +101,7 @@ class MR_semi(data.Dataset):
             file_neg = []
             file_pos = []
             count = 0
-            cut = 4798-numlabel/2
+            cut = 4798-int(numlabel/2)
             with codecs.open(os.path.join(path, 'rt-polarity.neg'),'r','utf8') as f:
                 for line in f:
                     file_neg.append(line)
@@ -134,7 +134,7 @@ class MR_semi(data.Dataset):
     def splits(cls, text_field, label_field, numlabel,shuffle=True ,root='.',path="./datasets/MR/", **kwargs):
 
         examples = cls(text_field, label_field,numlabel, path=path, **kwargs).examples
-        unsup_index = 4798-numlabel/2
+        unsup_index = 4798-int(numlabel/2)
         train_index = 4798
         test_index = 5331
         unsup_examples = examples[0:unsup_index] + examples[test_index:][0:unsup_index]

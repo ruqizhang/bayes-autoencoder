@@ -61,7 +61,6 @@ label_field = data.Field(sequential=False)
 
 unsup_data, train_data,  test_data = classification_datasets.load_mr_semi(text_field, label_field, numlabel = args.numlabel,batch_size=args.batch_size)
 ntokens=len(text_field.vocab)
-iterator = zip(unsup_data, itertools.cycle(train_data))
 
 ###############################################################################
 # Build the model
@@ -85,7 +84,6 @@ def get_batch(source, i, evaluation=False):
     return data, target
 
 def loss_function(recon_batch, x):
-    # print(recon_batch,x)
     recon_batch = recon_batch.view(-1,ntokens)
     BCE = F.cross_entropy(recon_batch, x)
     return BCE
@@ -101,16 +99,12 @@ def z_prior_loss(z):
 
 def z_noise_loss(z):
 
-    learning_rate = lr
-
-    noise_std = np.sqrt(2*learning_rate*alpha)
-    noise_std = torch.from_numpy(np.array([noise_std])).float().cuda(device_id)
-    noise_std = noise_std[0]
+    noise_std = (2/lr*alpha)**.5
     means = torch.zeros(z.size()).cuda(device_id)
     noise_loss = torch.sum(z * Variable(torch.normal(means, std = noise_std).cuda(device_id),
                            requires_grad = False))
-    #print('noise_loss',noise_loss)#1e-8
     return noise_loss
+
 def loss_label(fake_label,label_2):
 
     loss = F.binary_cross_entropy(fake_label,label_2)
@@ -124,14 +118,12 @@ def get_accuracy(truth, pred):
              right += 1.0
     return right/len(truth)
 def evaluate(data_source):
-    # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0
     total_kld = 0
     count=0
     truth_res = []
     pred_res = []
-    # hidden = model.init_hidden(eval_batch_size)
     for batch in data_source:
         data, label = batch.text, batch.label
         data,label = data.cuda(device_id), label.cuda(device_id)
@@ -159,7 +151,6 @@ def z_opt(z_sample):
 
     return opt
 def train():
-    # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0
     start_time = time.time()
@@ -167,7 +158,7 @@ def train():
     truth_res = []
     pred_res = []
     count = 0.0
-    # hidden = model.init_hidden(args.batch_size)
+    iterator = zip(unsup_data, itertools.cycle(train_data))
     for (unbatch, lbatch) in iterator:
         data, label = lbatch.text, lbatch.label
         undata = unbatch.text
@@ -212,15 +203,12 @@ def train():
                 model.decoder.bsz = undata.size(1)
                 model.label.bsz = undata.size(1)
                 unemb = model.embed(undata[:-1,:])
-                # unfake_label = model.label(unemb,unz_sample)
                 unrecon_batch = model.decoder(unemb,unz_sample)
 
             BCE = loss_function(recon_batch, out_ix)
             unBCE = loss_function(unrecon_batch, unout_ix)
             label_loss = loss_label(fake_label,label_2)
-            prior_loss = model.prior_loss(prior_std)
             noise_loss = model.noise_loss(lr,alpha)
-            prior_loss /=args.bptt*len(train_data)
             noise_loss /=args.bptt*len(train_data)
             prior_loss_z = z_prior_loss(z_sample)
             noise_loss_z = z_noise_loss(z_sample)
@@ -230,10 +218,10 @@ def train():
             unnoise_loss_z = z_noise_loss(unz_sample)
             unprior_loss_z /=args.bptt*len(train_data)
             unnoise_loss_z /=args.bptt*len(train_data)
-            loss = BCE+unBCE+label_loss+ prior_loss+noise_loss+prior_loss_z+noise_loss_z+unprior_loss_z+unnoise_loss_z
+            loss = BCE+unBCE+label_loss+noise_loss+prior_loss_z+noise_loss_z+unprior_loss_z+unnoise_loss_z
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
             optimizer.step()
             if j>burnin:
                 z_optimizer.step()
@@ -243,7 +231,7 @@ def train():
                 unloss_en = en_loss(unz_sample,unz)
                 loss = loss_en+unloss_en
                 loss.backward()
-                torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
                 optimizer.step()
         count += 1
 
@@ -251,7 +239,7 @@ def train():
         _,pred_label = torch.max(torch.exp(fake_label),1)
         pred_res += list(pred_label.data)
         if count % args.log_interval == 0 and count > 0:
-            cur_loss = total_loss[0] / args.log_interval
+            cur_loss = total_loss.item() / args.log_interval
             elapsed = time.time() - start_time
             print('| epoch {:3d} | lr {:5.5f} | ms/batch {:5.2f} | '
                     'loss {:5.2f}  '.format(
@@ -261,21 +249,21 @@ def train():
             start_time = time.time()
     print('epoch: %d done!\n acc:%g'%(epoch, get_accuracy(truth_res,pred_res)))
 
-# Loop over epochs.
 lr = args.lr
 alpha = 0.7
 prior_std = 1
 burnin = 0
 J = 2
 optimizer = optim.SGD(model.parameters(), lr=lr,momentum = 1-alpha)
+mt = 0
 for epoch in range(1, args.epochs+1):
     epoch_start_time = time.time()
     train()
-    # val_loss = evaluate(val_data)
     test_loss = evaluate(test_data)
     if epoch > 80:
         print('save!')
-        torch.save(model.state_dict(),'./checkpoints/model_un1000_a0.7_2%i%i.pt'%(mt,epoch))
+        torch.save(model.state_dict(),'./checkpoints/bae_label%d_seed%d_%i.pt'%(args.numlabel,args.seed,mt))
+        mt += 1
     print('-' * 89)
     print('| end of epoch {:3d} | time: {:5.2f}s | test acc{:5.5f} | '
             .format(epoch, (time.time() - epoch_start_time),

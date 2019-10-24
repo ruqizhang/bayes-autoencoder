@@ -7,6 +7,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 import models
+import model_bae
 import torch.optim as optim
 import classification_datasets
 from torchtext import data
@@ -36,7 +37,7 @@ parser.add_argument('--dropout', type=float, default=0.5,
                     help='dropout applied to layers (0 = no dropout)')
 parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
-parser.add_argument('--seed', type=int, default=1111,
+parser.add_argument('--seed', type=int, default=1,
                     help='random seed')
 parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
@@ -57,15 +58,17 @@ args.cuda = True
 text_field = data.Field(lower=True,init_token = '<SOS>',eos_token='<EOS>')
 label_field = data.Field(sequential=False)
 
-unsup_data,train_data,  test_data = classification_datasets.load_mr_semi(text_field, label_field, batch_size=args.batch_size)
+unsup_data, train_data,  test_data = classification_datasets.load_mr_semi(text_field, label_field, numlabel = args.numlabel,batch_size=args.batch_size)
 ntokens=len(text_field.vocab)
 
 ###############################################################################
 # Build the model
 ###############################################################################
-
-model_cfg = getattr(models, args.model)
-model = model_cfg.VAE(args.model, ntokens, args.emsize, args.nhid, args.zdim,args.nlayers,device_id,args.batch_size, args.dropout, args.tied)
+if args.model == 'bae' or args.model == 'baeg':
+    model = model_bae.VAE(args.model, ntokens, args.emsize, args.nhid, args.zdim,args.nlayers,device_id,args.batch_size, args.dropout, args.tied)
+else:
+    model_cfg = getattr(models, args.model)
+    model = model_cfg.VAE(args.model, ntokens, args.emsize, args.nhid, args.zdim,args.nlayers,device_id,args.batch_size, args.dropout, args.tied)
 if args.cuda:
     model.cuda(device_id)
 
@@ -88,11 +91,11 @@ def loss_function(recon_batch, x, mu, logvar):
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     KLD /= args.batch_size*args.bptt
     return BCE, KLD
+
 def loss_label(fake_label,label_2):
-
     loss = F.binary_cross_entropy(fake_label,label_2)
-
     return 50*loss
+
 def get_accuracy(truth, pred):
     assert len(truth)==len(pred)
     right = 0
@@ -100,8 +103,8 @@ def get_accuracy(truth, pred):
         if truth[i]==pred[i]:
              right += 1.0
     return right/len(truth)
+
 def evaluate(data_source):
-    # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0
     total_kld = 0
@@ -109,7 +112,6 @@ def evaluate(data_source):
     truth_res = []
     pred_res = []
     pred = []
-    # hidden = model.init_hidden(eval_batch_size)
     for batch in data_source:
         data, label = batch.text, batch.label
         data,label = data.cuda(device_id), label.cuda(device_id)
@@ -123,36 +125,26 @@ def evaluate(data_source):
         row = range(args.batch_size)
         label_2 = Variable(torch.zeros(args.batch_size,2).cuda(device_id),requires_grad = False)
         label_2[row,label] = 1
-        recon_batch, mu,logvar,fake_label = model(data[:-1,:],label_2)
-        BCE,KLD = loss_function(recon_batch, out_ix,mu,logvar)
-        loss = BCE+KLD
+        if args.model == 'bae' or args.model == 'baeg':
+            model.encoder.bsz = data.size(1)
+            model.label.bsz = data.size(1)
+            recon_batch, z,fake_label = model(data[:-1,:])
+        else:
+            recon_batch, mu,logvar,fake_label = model(data[:-1,:],label_2)
+
         _,pred_label = torch.max(fake_label,1)
         pred_res += list(pred_label.data)
         pred.append(fake_label)
-        total_loss += loss.data[0]
-        total_kld += KLD.data[0]
         count+=1
     pred = torch.cat(pred,0)
-    avg = total_loss / count
-    avg_kld = total_kld/count
     acc = get_accuracy(truth_res,pred_res)
-    print(' acc :%g avg_loss:%g kld:%g' % (acc,avg, avg_kld ))
+    print(' acc :%g' % (acc))
     return pred,truth_res
 
-# Loop over epochs.
-lr = args.lr
-alpha = 1
-prior_std = 1
-epoch_cut = 0
-best_test_loss = None
-start = 81
-interval = 1
-num_model = (101-start)/interval
+num_model = 20
 pred_list = []
 for m in range(num_model):
-    # if mt==2:
-    #     break
-    model.load_state_dict(torch.load('./checkpoints/model_un1000_a0.7_3%i.pt'%(m*interval+start)))
+    model.load_state_dict(torch.load('./checkpoints/%s_label%d_seed%d_%i.pt'%(args.model,args.numlabel,args.seed,m)))
     pred ,truth_res= evaluate(test_data)
     pred_list.append(pred)
 
@@ -160,6 +152,5 @@ for m in range(num_model):
 fake = sum(pred_list)/(num_model)
 values, pred_label = torch.max(fake,dim = 1)
 pred_res = list(pred_label.data)
-# print(truth_res)
 acc = get_accuracy(truth_res, pred_res)
 print(acc)

@@ -20,17 +20,8 @@ class Encode(nn.Module):
         self.fc21.weight.data.uniform_(-initrange, initrange)
         self.fc22.bias.data.fill_(0)
         self.fc22.weight.data.uniform_(-initrange, initrange)
-    # def init_hidden(self):
-    #     # the first is the hidden h
-    #     # the second is the cell  c
-    #     return (Variable(torch.zeros(1, args.batch_size, self.hidden_dim).cuda(device_id)),
-    #             Variable(torch.zeros(1, args.batch_size, self.hidden_dim).cuda(device_id)))
 
     def forward(self, x):
-        # h = self.init_hidden()
-        # x = x.view(args.batch_size , x.size(1), self.x_dim)
-
-        #print(x)
         lstm_out, _ = self.lstm(x)
         lstm_out = lstm_out[-1,:,:]
         lstm_out = self.drop(lstm_out)
@@ -63,7 +54,6 @@ class Decode(nn.Module):
         z_y = torch.cat((z,y),dim = 1)
         h0 = self.fc5(z_y)
         h0 = h0.unsqueeze(0)
-        # h0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         s0 = (h0,c0)
         ht,st = self.lstm(x_emb,s0)
         ht = self.drop(ht)
@@ -75,29 +65,16 @@ class Label(nn.Module):
         super(Label, self).__init__()
         self.x_dim = x_dim
         self.hidden_dim = hidden_dim
-        #self.hw1 = Highway(x_dim, 4, F.relu)
         self.lstm = nn.LSTM(x_dim, hidden_dim,dropout=dropout)
-        # self.hw1 = Highway(hidden_dim, 1, F.relu)
         self.fc1 = nn.Linear(hidden_dim, 2)
         self.drop = nn.Dropout(dropout)
 
-        # self.init_weights()
-    # def init_weights(self):
-    #     initrange = 0.1
-    #     self.fc1.bias.data.fill_(0)
-    #     self.fc1.weight.data.uniform_(-initrange, initrange)
-
     def forward(self, x):
-        # print(x)
         lstm_out, _ = self.lstm(x)
         lstm_out = lstm_out[-1,:,:]
         lstm_out = self.drop(lstm_out)
-        # lstm_out = lstm_out[:, :self.hidden_dim] + lstm_out[: ,self.hidden_dim:]
-        # print(lstm_out)
-        # lstm_out = lstm_out.contiguous().view(-1,seq_len*hidden_dim)
         recon_label = self.fc1(lstm_out)
         probs = F.softmax(recon_label,dim = 1)
-        # print(recon_label)
 
         return probs
 
@@ -146,24 +123,11 @@ class VAE(nn.Module):
             recon_batch = self.decoder(emb,z,fake_label)
         return recon_batch, mu,logvar,fake_label
 
-    def prior_loss(self,prior_std):
-        prior_loss = 0.0
-        for var in self.parameters():
-            nn = torch.div(var, prior_std)
-            prior_loss += torch.sum(nn*nn)
-        #print('prior_loss',prior_loss)#1e-3
-        return 0.5*prior_loss
-
     def noise_loss(self,lr,alpha):
         noise_loss = 0.0
-        # learning_rate = base_lr * np.exp(-lr_decay *min(1.0, (train_iter*args.batch_size)/float(datasize)))
-        learning_rate = lr
-        noise_std = np.sqrt(2*learning_rate*alpha)
-        noise_std = torch.from_numpy(np.array([noise_std])).float().cuda(self.device_id)
-        noise_std = noise_std[0]
+        noise_std = np.sqrt(2/lr*alpha)
         for var in self.parameters():
             means = torch.zeros(var.size()).cuda(self.device_id)
-            noise_loss += torch.sum(var * Variable(torch.normal(means, std = noise_std).cuda(self.device_id),
-                               requires_grad = False))
-        #print('noise_loss',noise_loss)#1e-8
+            noise = Variable(torch.normal(means, std = noise_std).cuda(self.device_id),requires_grad = False)
+            noise_loss += torch.sum(var * noise)
         return noise_loss

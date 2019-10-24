@@ -19,17 +19,8 @@ class Encode(nn.Module):
         self.fc21.weight.data.uniform_(-initrange, initrange)
         self.fc22.bias.data.fill_(0)
         self.fc22.weight.data.uniform_(-initrange, initrange)
-    # def init_hidden(self):
-    #     # the first is the hidden h
-    #     # the second is the cell  c
-    #     return (Variable(torch.zeros(1, args.batch_size, self.hidden_dim).cuda(device_id)),
-    #             Variable(torch.zeros(1, args.batch_size, self.hidden_dim).cuda(device_id)))
 
     def forward(self, x):
-        # h = self.init_hidden()
-        # x = x.view(args.batch_size , x.size(1), self.x_dim)
-
-        #print(x)
         lstm_out, _ = self.lstm(x)
         lstm_out = lstm_out[-1,:,:]
         lstm_out = self.drop(lstm_out)
@@ -62,7 +53,6 @@ class Decode(nn.Module):
         z_y = torch.cat((z,y),dim = 1)
         h0 = self.fc5(z_y)
         h0 = h0.unsqueeze(0)
-        # h0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         s0 = (h0,c0)
         ht,st = self.lstm(x_emb,s0)
         ht = self.drop(ht)
@@ -75,24 +65,17 @@ class Label(nn.Module):
         super(Label, self).__init__()
         self.x_dim = x_dim
         self.hidden_dim = hidden_dim
-        #self.hw1 = Highway(x_dim, 4, F.relu)
         self.lstm = nn.LSTM(x_dim, hidden_dim,dropout=dropout)
-        # self.hw1 = Highway(hidden_dim, 1, F.relu)
         self.fc1 = nn.Linear(hidden_dim, 2)
         self.drop = nn.Dropout(dropout)
 
 
     def forward(self, x):
-        # print(x)
         lstm_out, _ = self.lstm(x)
         lstm_out = lstm_out[-1,:,:]
         lstm_out = self.drop(lstm_out)
-        # lstm_out = lstm_out[:, :self.hidden_dim] + lstm_out[: ,self.hidden_dim:]
-        # print(lstm_out)
-        # lstm_out = lstm_out.contiguous().view(-1,seq_len*hidden_dim)
         recon_label = self.fc1(lstm_out)
         probs = F.softmax(recon_label,dim = 1)
-        # print(recon_label)
 
         return probs
 

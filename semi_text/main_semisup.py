@@ -102,14 +102,12 @@ def get_accuracy(truth, pred):
              right += 1.0
     return right/len(truth)
 def evaluate(data_source):
-    # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0
     total_kld = 0
     count=0
     truth_res = []
     pred_res = []
-    # hidden = model.init_hidden(eval_batch_size)
     for batch in data_source:
         data, label = batch.text, batch.label
         data,label = data.cuda(device_id), label.cuda(device_id)
@@ -128,8 +126,8 @@ def evaluate(data_source):
         loss = BCE+KLD
         _,pred_label = torch.max(fake_label,1)
         pred_res += list(pred_label.data)
-        total_loss += loss.data[0]
-        total_kld += KLD.data[0]
+        total_loss += loss.data.item()
+        total_kld += KLD.data.item()
         count+=1
     avg = total_loss / count
     avg_kld = total_kld/count
@@ -139,7 +137,6 @@ def evaluate(data_source):
 
 
 def train():
-    # Turn on training mode which enables dropout.
     model.train()
     total_loss = 0
     start_time = time.time()
@@ -147,7 +144,7 @@ def train():
     truth_res = []
     pred_res = []
     count = 0.0
-    # hidden = model.init_hidden(args.batch_size)
+    iterator = zip(unsup_data, itertools.cycle(train_data))
     for (unbatch, lbatch) in iterator:
         data, label = lbatch.text, lbatch.label
         undata = unbatch.text
@@ -176,42 +173,41 @@ def train():
         unBCE,unKLD = loss_function(recon_batch, unout_ix,mu,logvar)
         loss += unBCE + unKLD
         if args.model == "bvae":
-            prior_loss = model.prior_loss(prior_std)
             noise_loss = model.noise_loss(lr,alpha)
-            prior_loss /=args.bptt*len(train_data)
             noise_loss /=args.bptt*len(train_data)
-            loss += prior_loss+noise_loss
+            loss += noise_loss
         loss.backward()
 
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
         optimizer.step()
         count +=1
         total_loss += loss.data
         _,pred_label = torch.max(torch.exp(fake_label),1)
         pred_res += list(pred_label.data)
         if count % args.log_interval == 0 and count > 0:
-            cur_loss = total_loss[0] / args.log_interval
+            cur_loss = total_loss.item() / args.log_interval
             elapsed = time.time() - start_time
             print('| epoch {:3d} | lr {:5.5f} | ms/batch {:5.2f} | '
                     'loss {:5.2f}  | kld {:5.9f}'.format(
                 epoch,   lr,
-                elapsed * 1000 / args.log_interval, cur_loss, KLD.data[0]))
+                elapsed * 1000 / args.log_interval, cur_loss, KLD.data.item()))
             total_loss = 0
             start_time = time.time()
     print('epoch: %d done!\n acc:%g'%(epoch, get_accuracy(truth_res,pred_res)))
-# Loop over epochs.
+
 lr = args.lr
 alpha = 0.7
 prior_std = 1
 optimizer = optim.SGD(model.parameters(), lr=lr,momentum = 1-alpha)
+mt = 0
 for epoch in range(1, args.epochs+1):
     epoch_start_time = time.time()
     train()
     test_loss = evaluate(test_data)
     if epoch > 80:
         print('save!')
-        torch.save(model.state_dict(),'./checkpoints/model_un1500_a0.7_3_seed1%i.pt'%(epoch))
+        torch.save(model.state_dict(),'./checkpoints/%s_label%d_seed%d_%i.pt'%(args.model,args.numlabel,args.seed,mt))    
+        mt += 1
     print('-' * 89)
     print('| end of epoch {:3d} | time: {:5.2f}s | test acc {:5.5f} | '
             .format(epoch, (time.time() - epoch_start_time),

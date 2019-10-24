@@ -14,7 +14,6 @@ class Encode(nn.Module):
         self.device_id = device_id
         self.lstm = nn.LSTM(x_dim, hidden_dim,dropout=dropout)
         self.fc21 = nn.Linear(hidden_dim, z_dim) #mean
-        # self.fc22 = nn.Linear(hidden_dim, z_dim) #logvar
         self.drop = nn.Dropout(dropout)
         self.fc5 = nn.Linear(z_dim,hidden_dim)
         self.init_weights()
@@ -33,7 +32,6 @@ class Encode(nn.Module):
         xi = self.noise()
         h0 = self.fc5(xi)
         h0 = h0.unsqueeze(0)
-        # h0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         s0 = (h0,c0)
         lstm_out, _ = self.lstm(x,s0)
         lstm_out = lstm_out[-1,:,:]
@@ -65,7 +63,6 @@ class Decode(nn.Module):
         c0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         h0 = self.fc5(z)
         h0 = h0.unsqueeze(0)
-        # h0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         s0 = (h0,c0)
         ht,st = self.lstm(x_emb,s0)
         ht = self.drop(ht)
@@ -78,9 +75,7 @@ class Label(nn.Module):
         self.x_dim = x_dim
         self.hidden_dim = hidden_dim
         self.fc5 = nn.Linear(z_dim,hidden_dim)
-        #self.hw1 = Highway(x_dim, 4, F.relu)
         self.lstm = nn.LSTM(x_dim, hidden_dim,dropout=dropout)
-        # self.hw1 = Highway(hidden_dim, 1, F.relu)
         self.fc1 = nn.Linear(hidden_dim, 2)
         self.drop = nn.Dropout(dropout)
         self.device_id = device_id
@@ -97,17 +92,12 @@ class Label(nn.Module):
         c0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         h0 = self.fc5(z)
         h0 = h0.unsqueeze(0)
-        # h0 = Variable(torch.zeros((1,self.bsz,self.hidden_dim)).cuda(self.device_id))
         s0 = (h0,c0)
         lstm_out, _ = self.lstm(x,s0)
         lstm_out = lstm_out[-1,:,:]
         lstm_out = self.drop(lstm_out)
-        # lstm_out = lstm_out[:, :self.hidden_dim] + lstm_out[: ,self.hidden_dim:]
-        # print(lstm_out)
-        # lstm_out = lstm_out.contiguous().view(-1,seq_len*hidden_dim)
         recon_label = self.fc1(lstm_out)
         probs = F.softmax(recon_label,dim = 1)
-        # print(recon_label)
 
         return probs
 class VAE(nn.Module):
@@ -140,31 +130,12 @@ class VAE(nn.Module):
         recon_batch = self.decoder(emb,z)
         return recon_batch,z,fake_label
 
-    def prior_loss(self,prior_std):
-        prior_loss = 0.0
-        for var in self.parameters():
-            nn = torch.div(var, prior_std)
-            prior_loss += torch.sum(nn*nn)
-        #print('prior_loss',prior_loss)#1e-3
-        return 0.5*prior_loss
-
     def noise_loss(self,lr,alpha):
         noise_loss = 0.0
-        # learning_rate = base_lr * np.exp(-lr_decay *min(1.0, (train_iter*args.batch_size)/float(datasize)))
-        learning_rate = lr
-        noise_std = np.sqrt(2*learning_rate*alpha)
-        noise_std = torch.from_numpy(np.array([noise_std])).float().cuda(self.device_id)
-        noise_std = noise_std[0]
+        noise_std = np.sqrt(2/lr*alpha)
         for var in self.parameters():
             means = torch.zeros(var.size()).cuda(self.device_id)
-            noise_loss += torch.sum(var * Variable(torch.normal(means, std = noise_std).cuda(self.device_id),
-                               requires_grad = False))
-        #print('noise_loss',noise_loss)#1e-8
+            noise = Variable(torch.normal(means, std = noise_std).cuda(self.device_id),requires_grad = False)
+            noise_loss += torch.sum(var * noise)
         return noise_loss
-    # def init_hidden(self, bsz):
-    #     weight = next(self.parameters()).data
-    #     if self.rnn_type == 'LSTM':
-    #         return (Variable(weight.new(self.nlayers, bsz, self.nhid).zero_()),
-    #                 Variable(weight.new(self.nlayers, bsz, self.nhid).zero_()))
-    #     else:
-    #         return Variable(weight.new(self.nlayers, bsz, self.nhid).zero_())
+  
